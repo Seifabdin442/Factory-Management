@@ -1,18 +1,69 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const initSqlJs = require("sql.js");
 
+// electron-updater is optional at runtime: if it is missing (e.g. dev mode) the app still works.
+let autoUpdater = null;
+try { ({ autoUpdater } = require("electron-updater")); } catch (e) { autoUpdater = null; }
+
 let db = null;
+let mainWindow = null;
+const SCHEMA_VERSION = 2;
 
 function dbFilePath() {
   return path.join(app.getPath("userData"), "factory-ledger.sqlite");
 }
 
+// Write to a temporary file first, then swap it in, so a crash or power cut mid-save
+// can never leave a half-written database behind.
 function persist() {
-  const data = db.export();
-  fs.writeFileSync(dbFilePath(), Buffer.from(data));
+  const data = Buffer.from(db.export());
+  const file = dbFilePath();
+  const tmp = file + ".tmp";
+  fs.writeFileSync(tmp, data);
+  try {
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    // Windows can briefly lock the file (antivirus, backup tools); fall back to a direct write.
+    fs.writeFileSync(file, data);
+    try { fs.unlinkSync(tmp); } catch (e) { /* ignore */ }
+  }
+}
+
+function columnExists(table, column) {
+  return rowsFromQuery(`PRAGMA table_info(${table})`).some((r) => r.name === column);
+}
+
+// Upgrades an existing database in place. Every step is safe to run more than once.
+function migrate() {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS transaction_items (
+      id TEXT PRIMARY KEY,
+      txId TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      catalogId TEXT,
+      description TEXT,
+      quantity REAL,
+      unitPrice REAL,
+      total REAL
+    );
+    CREATE INDEX IF NOT EXISTS idx_items_tx ON transaction_items(txId);
+    CREATE INDEX IF NOT EXISTS idx_tx_party ON transactions(partyId);
+    CREATE TABLE IF NOT EXISTS catalog_items (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      unit TEXT,
+      salePrice REAL,
+      purchasePrice REAL,
+      notes TEXT
+    );
+  `);
+  if (!columnExists("transactions", "category")) db.run("ALTER TABLE transactions ADD COLUMN category TEXT");
+  if (!columnExists("users", "recoverySalt")) db.run("ALTER TABLE users ADD COLUMN recoverySalt TEXT");
+  if (!columnExists("users", "recoveryHash")) db.run("ALTER TABLE users ADD COLUMN recoveryHash TEXT");
+  db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
 async function initDb() {
@@ -20,13 +71,20 @@ async function initDb() {
     ? path.join(process.resourcesPath, "app.asar.unpacked", "node_modules", "sql.js", "dist", "sql-wasm.wasm")
     : path.join(__dirname, "..", "node_modules", "sql.js", "dist", "sql-wasm.wasm");
 
-  const SQL = await initSqlJs({
-    locateFile: () => (fs.existsSync(wasmPath) ? wasmPath : require.resolve("sql.js/dist/sql-wasm.wasm")),
-  });
+  console.log("[factory-ledger] isPackaged =", app.isPackaged, "wasmPath =", wasmPath, "exists =", fs.existsSync(wasmPath));
+
+  const SQL = await initSqlJs({ locateFile: () => wasmPath });
 
   const file = dbFilePath();
+  console.log("[factory-ledger] db file =", file, "exists =", fs.existsSync(file));
   if (fs.existsSync(file)) {
     db = new SQL.Database(fs.readFileSync(file));
+    // Keep a one-time copy of the database before upgrading it to a newer structure.
+    const version = rowsFromQuery("PRAGMA user_version")[0].user_version || 0;
+    if (version < SCHEMA_VERSION) {
+      const backup = path.join(path.dirname(file), `factory-ledger.before-v${SCHEMA_VERSION}.sqlite`);
+      if (!fs.existsSync(backup)) fs.copyFileSync(file, backup);
+    }
   } else {
     db = new SQL.Database();
   }
@@ -57,7 +115,22 @@ async function initDb() {
       hash TEXT NOT NULL,
       createdAt TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+    CREATE TABLE IF NOT EXISTS issued_documents (
+      number TEXT PRIMARY KEY,
+      year INTEGER NOT NULL,
+      seq INTEGER NOT NULL,
+      partyId TEXT,
+      dateFrom TEXT,
+      dateTo TEXT,
+      mode TEXT,
+      issuedAt TEXT NOT NULL
+    );
   `);
+  migrate();
   persist();
 }
 
@@ -75,6 +148,61 @@ function hashPassword(password, salt) {
   return crypto.scryptSync(password, salt, 64).toString("hex");
 }
 
+/* Recovery codes: 16 characters shown once, stored only as a salted hash (like the password).
+   Letters/digits that look alike (O/0, I/1/L) are left out so the code is easy to read back. */
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+function newRecoveryCode() {
+  const bytes = crypto.randomBytes(16);
+  let raw = "";
+  for (let i = 0; i < 16; i++) raw += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  return raw.match(/.{4}/g).join("-");
+}
+
+function normalizeCode(code) {
+  return String(code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function storeRecoveryCode(userId) {
+  const code = newRecoveryCode();
+  const salt = crypto.randomBytes(16).toString("hex");
+  db.run("UPDATE users SET recoverySalt = ?, recoveryHash = ? WHERE id = ?", [salt, hashPassword(normalizeCode(code), salt), userId]);
+  return code;
+}
+
+function safeEqualHex(a, b) {
+  const x = Buffer.from(a || "", "hex");
+  const y = Buffer.from(b || "", "hex");
+  return x.length > 0 && x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+function checkPassword(user, password) {
+  return safeEqualHex(hashPassword(String(password || ""), user.salt), user.hash);
+}
+
+function setPassword(userId, password) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  db.run("UPDATE users SET salt = ?, hash = ? WHERE id = ?", [salt, hashPassword(password, salt), userId]);
+}
+
+function adminUser() {
+  const rows = rowsFromQuery("SELECT * FROM users ORDER BY createdAt LIMIT 1");
+  return rows[0] || null;
+}
+
+// Slow down guessing: after 5 wrong attempts, wait before trying again.
+const attempts = { login: { fails: 0, until: 0 }, reset: { fails: 0, until: 0 } };
+function lockedFor(kind) {
+  const left = attempts[kind].until - Date.now();
+  return left > 0 ? Math.ceil(left / 1000) : 0;
+}
+function recordFail(kind) {
+  const a = attempts[kind];
+  a.fails += 1;
+  if (a.fails >= 5) { a.until = Date.now() + 30000 * Math.min(a.fails - 4, 10); }
+}
+function recordSuccess(kind) { attempts[kind] = { fails: 0, until: 0 }; }
+
 ipcMain.handle("auth-has-admin", () => {
   const rows = rowsFromQuery("SELECT COUNT(*) as c FROM users");
   return rows[0] && rows[0].c > 0;
@@ -83,24 +211,60 @@ ipcMain.handle("auth-has-admin", () => {
 ipcMain.handle("auth-create-admin", (e, { username, password }) => {
   const existing = rowsFromQuery("SELECT COUNT(*) as c FROM users");
   if (existing[0] && existing[0].c > 0) return { ok: false, reason: "exists" };
+  const id = crypto.randomUUID();
   const salt = crypto.randomBytes(16).toString("hex");
-  const hash = hashPassword(password, salt);
   db.run("INSERT INTO users (id,username,salt,hash,createdAt) VALUES (?,?,?,?,?)", [
-    crypto.randomUUID(), username, salt, hash, new Date().toISOString(),
+    id, username, salt, hashPassword(password, salt), new Date().toISOString(),
   ]);
+  const recoveryCode = storeRecoveryCode(id);
+  persist();
+  return { ok: true, recoveryCode };
+});
+
+ipcMain.handle("auth-login", (e, { username, password }) => {
+  const wait = lockedFor("login");
+  if (wait) return { ok: false, reason: "locked", wait };
+  const rows = rowsFromQuery("SELECT * FROM users WHERE username = ?", [username]);
+  const user = rows[0];
+  if (!user || !checkPassword(user, password)) { recordFail("login"); return { ok: false }; }
+  recordSuccess("login");
+  // Installs from before v1.2 have no recovery code yet: create one now and show it once.
+  if (!user.recoveryHash) {
+    const recoveryCode = storeRecoveryCode(user.id);
+    persist();
+    return { ok: true, username: user.username, recoveryCode };
+  }
+  return { ok: true, username: user.username };
+});
+
+ipcMain.handle("auth-reset-with-code", (e, { code, newPassword }) => {
+  const wait = lockedFor("reset");
+  if (wait) return { ok: false, reason: "locked", wait };
+  const user = adminUser();
+  if (!user || !user.recoveryHash) return { ok: false, reason: "no-code" };
+  const ok = safeEqualHex(hashPassword(normalizeCode(code), user.recoverySalt), user.recoveryHash);
+  if (!ok) { recordFail("reset"); return { ok: false }; }
+  recordSuccess("reset");
+  setPassword(user.id, String(newPassword));
+  const recoveryCode = storeRecoveryCode(user.id); // the used code stops working
+  persist();
+  return { ok: true, username: user.username, recoveryCode };
+});
+
+ipcMain.handle("auth-change-password", (e, { currentPassword, newPassword }) => {
+  const user = adminUser();
+  if (!user || !checkPassword(user, currentPassword)) return { ok: false };
+  setPassword(user.id, String(newPassword));
   persist();
   return { ok: true };
 });
 
-ipcMain.handle("auth-login", (e, { username, password }) => {
-  const rows = rowsFromQuery("SELECT * FROM users WHERE username = ?", [username]);
-  if (!rows.length) return { ok: false };
-  const user = rows[0];
-  const hash = hashPassword(password, user.salt);
-  const a = Buffer.from(hash, "hex");
-  const b = Buffer.from(user.hash, "hex");
-  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
-  return { ok };
+ipcMain.handle("auth-new-recovery-code", (e, { password }) => {
+  const user = adminUser();
+  if (!user || !checkPassword(user, password)) return { ok: false };
+  const recoveryCode = storeRecoveryCode(user.id);
+  persist();
+  return { ok: true, recoveryCode };
 });
 
 /* ---- parties ---- */
@@ -117,6 +281,7 @@ ipcMain.handle("db-upsert-party", (e, party) => {
 });
 
 ipcMain.handle("db-delete-party", (e, id) => {
+  db.run("DELETE FROM transaction_items WHERE txId IN (SELECT id FROM transactions WHERE partyId = ?)", [id]);
   db.run("DELETE FROM transactions WHERE partyId = ?", [id]);
   db.run("DELETE FROM parties WHERE id = ?", [id]);
   persist();
@@ -124,38 +289,273 @@ ipcMain.handle("db-delete-party", (e, id) => {
 });
 
 /* ---- transactions ---- */
-ipcMain.handle("db-get-transactions", () => rowsFromQuery("SELECT * FROM transactions ORDER BY date DESC"));
+ipcMain.handle("db-get-transactions", () => {
+  const txs = rowsFromQuery("SELECT * FROM transactions ORDER BY date DESC");
+  const byTx = new Map();
+  for (const it of rowsFromQuery("SELECT * FROM transaction_items ORDER BY txId, position")) {
+    if (!byTx.has(it.txId)) byTx.set(it.txId, []);
+    byTx.get(it.txId).push(it);
+  }
+  for (const tx of txs) tx.items = byTx.get(tx.id) || [];
+  return txs;
+});
 
 ipcMain.handle("db-upsert-transaction", (e, tx) => {
-  db.run(
-    `INSERT INTO transactions (id,kind,date,partyId,description,quantity,unitPrice,total,paid,notes)
-     VALUES (?,?,?,?,?,?,?,?,?,?)
-     ON CONFLICT(id) DO UPDATE SET
-       kind=excluded.kind, date=excluded.date, partyId=excluded.partyId, description=excluded.description,
-       quantity=excluded.quantity, unitPrice=excluded.unitPrice, total=excluded.total, paid=excluded.paid, notes=excluded.notes`,
-    [tx.id, tx.kind, tx.date, tx.partyId, tx.description || "", tx.quantity || 0, tx.unitPrice || 0, tx.total || 0, tx.paid || 0, tx.notes || ""]
-  );
+  db.run("BEGIN");
+  try {
+    db.run(
+      `INSERT INTO transactions (id,kind,date,partyId,description,quantity,unitPrice,total,paid,notes,category)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(id) DO UPDATE SET
+         kind=excluded.kind, date=excluded.date, partyId=excluded.partyId, description=excluded.description,
+         quantity=excluded.quantity, unitPrice=excluded.unitPrice, total=excluded.total, paid=excluded.paid,
+         notes=excluded.notes, category=excluded.category`,
+      [tx.id, tx.kind, tx.date, tx.partyId || null, tx.description || "", tx.quantity || 0, tx.unitPrice || 0,
+        tx.total || 0, tx.paid || 0, tx.notes || "", tx.category || null]
+    );
+    db.run("DELETE FROM transaction_items WHERE txId = ?", [tx.id]);
+    (tx.items || []).forEach((it, i) => {
+      db.run(
+        "INSERT INTO transaction_items (id,txId,position,catalogId,description,quantity,unitPrice,total) VALUES (?,?,?,?,?,?,?,?)",
+        [it.id || crypto.randomUUID(), tx.id, i, it.catalogId || null, it.description || "",
+          Number(it.quantity) || 0, Number(it.unitPrice) || 0, Number(it.total) || 0]
+      );
+    });
+    db.run("COMMIT");
+  } catch (err) {
+    db.run("ROLLBACK");
+    throw err;
+  }
   persist();
   return tx;
 });
 
 ipcMain.handle("db-delete-transaction", (e, id) => {
+  db.run("DELETE FROM transaction_items WHERE txId = ?", [id]);
   db.run("DELETE FROM transactions WHERE id = ?", [id]);
   persist();
   return { id };
 });
 
+/* ---- item / fabric catalog ---- */
+ipcMain.handle("db-get-catalog", () => rowsFromQuery("SELECT * FROM catalog_items ORDER BY name"));
+
+ipcMain.handle("db-upsert-catalog", (e, item) => {
+  db.run(
+    `INSERT INTO catalog_items (id,name,unit,salePrice,purchasePrice,notes) VALUES (?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET name=excluded.name, unit=excluded.unit, salePrice=excluded.salePrice,
+       purchasePrice=excluded.purchasePrice, notes=excluded.notes`,
+    [item.id, item.name, item.unit || "", Number(item.salePrice) || 0, Number(item.purchasePrice) || 0, item.notes || ""]
+  );
+  persist();
+  return item;
+});
+
+ipcMain.handle("db-delete-catalog", (e, id) => {
+  // Past entries keep their own copy of the name and price, so nothing else changes.
+  db.run("UPDATE transaction_items SET catalogId = NULL WHERE catalogId = ?", [id]);
+  db.run("DELETE FROM catalog_items WHERE id = ?", [id]);
+  persist();
+  return { id };
+});
+
+/* ---- settings (company details, invoice numbering) ---- */
+const SETTING_KEYS = [
+  "companyNameAr", "companyNameEn", "address", "phone", "email", "taxNumber",
+  "commercialRegister", "logo", "invoicePrefix", "invoiceStartNumber", "invoiceFooter",
+];
+
+function getSetting(key, fallback) {
+  const rows = rowsFromQuery("SELECT value FROM settings WHERE key = ?", [key]);
+  return rows.length && rows[0].value != null && rows[0].value !== "" ? rows[0].value : fallback;
+}
+
+ipcMain.handle("settings-get", () => {
+  const out = {};
+  for (const r of rowsFromQuery("SELECT key, value FROM settings")) out[r.key] = r.value;
+  return out;
+});
+
+ipcMain.handle("settings-save", (e, values) => {
+  for (const key of SETTING_KEYS) {
+    if (!values || !(key in values)) continue;
+    const v = values[key] == null ? "" : String(values[key]);
+    db.run(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      [key, v]
+    );
+  }
+  persist();
+  return { ok: true };
+});
+
+/* ---- sequential document numbers ----
+   A statement gets a permanent number the first time it is printed or saved as PDF.
+   Re-printing the same party + period + mode reuses that number instead of using up a new one. */
+function findIssued({ partyId, dateFrom, dateTo, mode }) {
+  const rows = rowsFromQuery(
+    "SELECT number FROM issued_documents WHERE partyId = ? AND dateFrom = ? AND dateTo = ? AND mode = ? ORDER BY issuedAt LIMIT 1",
+    [partyId, dateFrom, dateTo, mode]
+  );
+  return rows.length ? rows[0].number : null;
+}
+
+function nextNumber() {
+  const year = new Date().getFullYear();
+  const prefix = String(getSetting("invoicePrefix", "INV")).trim() || "INV";
+  const start = Math.max(parseInt(getSetting("invoiceStartNumber", "1"), 10) || 1, 1);
+  const rows = rowsFromQuery("SELECT MAX(seq) AS m FROM issued_documents WHERE year = ?", [year]);
+  let seq = Math.max((rows[0] && rows[0].m ? rows[0].m : 0) + 1, start);
+  let number = `${prefix}-${year}-${String(seq).padStart(4, "0")}`;
+  // Guard against a clash if the prefix was changed back and forth.
+  while (rowsFromQuery("SELECT 1 FROM issued_documents WHERE number = ?", [number]).length) {
+    seq += 1;
+    number = `${prefix}-${year}-${String(seq).padStart(4, "0")}`;
+  }
+  return { number, year, seq };
+}
+
+ipcMain.handle("doc-peek", (e, params) => {
+  const existing = findIssued(params);
+  if (existing) return { number: existing, issued: true };
+  return { number: nextNumber().number, issued: false };
+});
+
+ipcMain.handle("doc-issue", (e, params) => {
+  const existing = findIssued(params);
+  if (existing) return { number: existing, issued: true };
+  const { number, year, seq } = nextNumber();
+  db.run(
+    "INSERT INTO issued_documents (number, year, seq, partyId, dateFrom, dateTo, mode, issuedAt) VALUES (?,?,?,?,?,?,?,?)",
+    [number, year, seq, params.partyId, params.dateFrom, params.dateTo, params.mode, new Date().toISOString()]
+  );
+  persist();
+  return { number, issued: true };
+});
+
+/* ---- saving files (PDF / Excel) ---- */
+const savedPaths = new Set(); // only files this app saved can be opened from the UI
+
+function safeFileName(name) {
+  return String(name || "document").replace(/[\\/:*?"<>|]+/g, "-").trim() || "document";
+}
+
+async function askSavePath(sender, defaultName, filters) {
+  const win = BrowserWindow.fromWebContents(sender);
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    defaultPath: path.join(app.getPath("documents"), safeFileName(defaultName)),
+    filters,
+  });
+  return canceled || !filePath ? null : filePath;
+}
+
+ipcMain.handle("file-save-pdf", async (e, { defaultName }) => {
+  const filePath = await askSavePath(e.sender, defaultName, [{ name: "PDF", extensions: ["pdf"] }]);
+  if (!filePath) return { ok: false, canceled: true };
+  const data = await e.sender.printToPDF({
+    printBackground: true,
+    pageSize: "A4",
+    preferCSSPageSize: true,
+    displayHeaderFooter: true,
+    headerTemplate: "<div></div>",
+    footerTemplate:
+      '<div style="width:100%;font-size:8px;color:#888;text-align:center;font-family:Arial,sans-serif;">' +
+      '<span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+  });
+  fs.writeFileSync(filePath, data);
+  savedPaths.add(filePath);
+  return { ok: true, filePath };
+});
+
+ipcMain.handle("file-save", async (e, { defaultName, data, filters }) => {
+  const filePath = await askSavePath(e.sender, defaultName, filters || []);
+  if (!filePath) return { ok: false, canceled: true };
+  fs.writeFileSync(filePath, Buffer.from(data));
+  savedPaths.add(filePath);
+  return { ok: true, filePath };
+});
+
+ipcMain.handle("file-open", async (e, filePath) => {
+  if (!savedPaths.has(filePath)) return { ok: false };
+  const err = await shell.openPath(filePath);
+  return { ok: !err, error: err || undefined };
+});
+
+/* ---- app info ---- */
+ipcMain.handle("app-info", () => ({
+  version: app.getVersion(),
+  dbPath: dbFilePath(),
+  electron: process.versions.electron,
+}));
+
+ipcMain.handle("app-show-data-folder", () => {
+  shell.showItemInFolder(dbFilePath());
+  return { ok: true };
+});
+
+/* ---- automatic updates (GitHub Releases) ----
+   Checks shortly after start and every 6 hours. New versions download in the background;
+   the user chooses when to restart. If the computer is offline, nothing happens. */
+let updateStatus = { state: "idle" };
+
+function sendUpdateStatus(status) {
+  updateStatus = status;
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("update-status", status);
+}
+
+function setupAutoUpdates() {
+  if (!autoUpdater || !app.isPackaged) {
+    updateStatus = { state: "unsupported" };
+    return;
+  }
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on("checking-for-update", () => sendUpdateStatus({ state: "checking" }));
+  autoUpdater.on("update-available", (info) => sendUpdateStatus({ state: "downloading", version: info.version, percent: 0 }));
+  autoUpdater.on("update-not-available", () => sendUpdateStatus({ state: "current", checkedAt: new Date().toISOString() }));
+  autoUpdater.on("download-progress", (p) =>
+    sendUpdateStatus({ state: "downloading", version: updateStatus.version, percent: Math.round(p.percent || 0) }));
+  autoUpdater.on("update-downloaded", (info) => sendUpdateStatus({ state: "ready", version: info.version }));
+  autoUpdater.on("error", (err) => sendUpdateStatus({ state: "error", message: String((err && err.message) || err).slice(0, 300) }));
+  const check = () => autoUpdater.checkForUpdates().catch(() => {});
+  setTimeout(check, 8000);
+  setInterval(check, 6 * 60 * 60 * 1000);
+}
+
+ipcMain.handle("update-get-status", () => updateStatus);
+ipcMain.handle("update-check", async () => {
+  if (!autoUpdater || !app.isPackaged) return { state: "unsupported" };
+  try { await autoUpdater.checkForUpdates(); } catch (err) { sendUpdateStatus({ state: "error", message: String(err.message || err) }); }
+  return updateStatus;
+});
+ipcMain.handle("update-install", () => {
+  if (autoUpdater && updateStatus.state === "ready") {
+    setImmediate(() => autoUpdater.quitAndInstall(true, true));
+    return { ok: true };
+  }
+  return { ok: false };
+});
+
 function createWindow() {
-  const win = new BrowserWindow({
+  const iconPath = path.join(__dirname, "icon.png");
+  const win = (mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
+    minWidth: 980,
+    minHeight: 640,
+    title: "Factory Ledger",
     backgroundColor: "#F7F5EF",
+    autoHideMenuBar: true,
+    show: false,
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
     },
-  });
+  }));
+  win.setMenuBarVisibility(false);
+  win.once("ready-to-show", () => win.show());
 
   const isDev = !app.isPackaged;
   if (isDev) {
@@ -166,8 +566,16 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  await initDb();
-  createWindow();
+  try {
+    await initDb();
+    createWindow();
+    setupAutoUpdates();
+  } catch (err) {
+    console.error("[factory-ledger] startup failed:", err);
+    const { dialog } = require("electron");
+    dialog.showErrorBox("Factory Ledger failed to start", String((err && err.stack) || err));
+    app.quit();
+  }
 });
 
 app.on("window-all-closed", () => {

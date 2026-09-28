@@ -25,7 +25,7 @@ This opens the app in a window. Close the window to quit.
 ```
 npm run dist
 ```
-This creates a single file in the `release/` folder, e.g. `Factory Ledger Setup 1.0.0.exe`.
+This creates a single file in the `release/` folder, e.g. `Factory-Ledger-Setup-1.2.0.exe`.
 
 **That one file is everything your client needs.** Send it to them (USB drive, WhatsApp, email, Google Drive — anything).
 They just double-click it: no options screen, no questions — it installs the app, adds a "Factory Ledger" icon to
@@ -45,7 +45,8 @@ install everything and build the `.exe` on their servers — you only use a brow
    anything, e.g. `factory-ledger`. Public or private both work. Click **Create repository**.
 3. On the new repo's page, click **uploading an existing file** (or "Add file" → "Upload files").
 4. Open this unzipped folder on your computer, select everything inside it (including the hidden
-   `.github` folder — on Windows, enable "show hidden items" in File Explorer's View menu first),
+   `.github` folder and the `build` folder that holds the app icon — on Windows, enable "show hidden
+   items" in File Explorer's View menu first),
    and drag it all into the browser upload area. Click **Commit changes**.
 5. Go to the **Actions** tab of the repository. If asked, click "I understand my workflows, go ahead
    and enable them".
@@ -53,10 +54,90 @@ install everything and build the `.exe` on their servers — you only use a brow
    again to confirm.
 7. Wait 3–5 minutes for it to finish (green checkmark).
 8. Click into the finished run, scroll down to **Artifacts**, and download `factory-ledger-installer`.
-   Unzip it — inside is your one file, `Factory Ledger Setup 1.0.0.exe`. That's what you send to your
+   Unzip it — inside is your one file, `Factory-Ledger-Setup-1.2.0.exe`. That's what you send to your
    client.
 
 You only repeat this if you change the app later. Each run is free under GitHub's free-tier minutes.
+
+## First-time setup inside the app (Settings tab)
+
+Open **Settings** (الإعدادات) in the sidebar once and fill in:
+
+- **Company details** — Arabic and English company name, address, phone, email, tax registration
+  number, commercial register number, and a logo (PNG/JPG). These appear on every printed statement,
+  every saved PDF, and at the top of every Excel report. The sidebar also shows the company name.
+- **Document numbering** — a prefix (e.g. `INV` or `SOA`) and the number to start from (handy if the
+  factory already used numbers up to, say, 119 in a paper book — enter 120). Statements are numbered
+  like `INV-2026-0120`, restarting at 1 each new year.
+- **Footer note** — optional line printed at the bottom of statements, e.g. "Thank you for your business".
+
+## Statements, PDFs and Excel reports
+
+- **Invoices tab** → pick a client/supplier and a date range → **Print** or **Save as PDF**. The PDF
+  has page numbers and is saved wherever you choose; a notification offers to open it straight away.
+- A statement gets its permanent number the first time it's printed or saved. Printing the same
+  client + period + mode again reuses that number, so re-prints don't use up numbers. The on-screen
+  preview shows the number it will get before you commit.
+- **Reports tab** → real Excel `.xlsx` files (no more "file format doesn't match" warning). Amounts are
+  real numbers (you can sum/filter them in Excel), sheets are right-to-left in Arabic, the header row
+  stays frozen, totals rows use live `SUM` formulas, and they print to fit the page width. **Download
+  full monthly workbook** puts all four reports into one file, one sheet each.
+- **About** (sidebar) shows the app version and where the data file lives, with a button to open that folder.
+
+## What's in version 1.2
+
+- **Several items per purchase or sale** — each entry can have as many lines as needed (item, quantity,
+  unit price); the grand total is calculated for you. Statements list every item on its own line.
+- **Items & fabrics catalog** — save the things you buy and sell with their unit and default purchase/sale
+  price. When you type an item name in a purchase or sale, it's suggested and its price filled in.
+- **Expenses** — rent, salaries, utilities, transport, maintenance, supplies, other. Counted in money out
+  and in the **estimated profit** (sales − purchases − expenses) on the Dashboard and Reports.
+- **Date filters** on Purchases, Sales and Expenses (this month, last month, last 3 months, this year,
+  all time, or custom dates) with totals for whatever is shown.
+- **Dashboard charts** — money in vs out for the last 12 months (hover a month for details), who owes
+  you the most, and how old the unpaid balances are.
+- **Aging report** (Reports tab) — every open balance split into 0–30, 31–60, 61–90 and 90+ days, for
+  clients (owed to you) and suppliers (you owe). Exportable to Excel; included in the full monthly workbook.
+- **Keyboard shortcuts** (press **F1** in the app for the list): Ctrl+N new entry · Ctrl+F search ·
+  Ctrl+P print statement · Ctrl+1…9 switch pages · Ctrl+Enter save a form · Esc close. They work with
+  the Arabic keyboard layout too.
+- **Password reset with a recovery code** — see "Forgotten password" below.
+- **Automatic updates** — see the next section.
+- Safer saving: the database is written to a temporary file first and then swapped in, so a power cut
+  mid-save can't corrupt it. Before upgrading an older database, a one-time copy is kept next to it as
+  `factory-ledger.before-v2.sqlite`.
+
+## Automatic updates (how to ship a new version)
+
+Installed copies of the app check GitHub for a newer version when they start and every 6 hours. A new
+version downloads quietly in the background; the app then shows **"Restart & update"** in the sidebar
+(and in a notification). If they don't click it, the update installs the next time the app is closed.
+No internet → nothing happens, the app works as normal.
+
+**One-time setup**
+
+1. The repository must be **public**, because installed apps download updates from its Releases page
+   without logging in. To check: open the repo on GitHub — next to its name it says *Public* or
+   *Private*. To change: repo **Settings** → **General** → scroll to **Danger Zone** → **Change
+   visibility** → Public. (The app contains no passwords or customer data — those live only in each
+   computer's local database file.)
+2. In `package.json`, under `"build"` → `"publish"`, `"owner"` and `"repo"` must match your repository's
+   address: `github.com/<owner>/<repo>`. They're currently set to `Seifabdin442` / `Factory-Management`.
+3. Computers still on version 1.1 or older don't have the updater yet, so install **1.2 by hand once**
+   on each computer. From then on, updates are automatic.
+
+**Every time you want to send out an update**
+
+1. In `package.json`, increase `"version"` (e.g. `1.2.0` → `1.2.1`). Updates only go out when this
+   number goes up — the release workflow stops with a clear message if you forget.
+2. Upload the changed files to GitHub as usual and commit.
+3. **Actions** tab → **Release (auto-update)** → **Run workflow**. It builds the installer and publishes
+   it as a GitHub Release (you'll see it under **Releases** on the repo page).
+4. That's it — every installed copy picks it up on its own. The installer `.exe` is also attached to the
+   release (and to the workflow run) for installing on new computers.
+
+The older **Build Installer** workflow still works for test builds: it makes an installer you can try
+yourself without sending an update to anyone.
 
 ## The database file — backup, restore, and direct editing
 
@@ -96,7 +177,17 @@ to configure per person before you build it. Each person's computer gets its own
 5. From then on, opening the app (from the desktop icon) always asks for that username and password
    first. There's a **Log out** button in the sidebar if they want to lock it without closing the app.
 
-If someone forgets their password, there's currently no in-app "reset password" flow — the fix is to
-close the app and delete their `factory-ledger.sqlite` file (see path above), which wipes that
-person's data and lets them go through "Set up the admin account" again from scratch. Let me know if
-you'd rather have a proper password-reset flow instead of that — I can add one.
+### Forgotten password — recovery code
+
+When the admin account is created (or, on computers upgraded from an older version, at the first
+login after the upgrade) the app shows a **recovery code** like `H6TB-XRM9-4N6D-PFB4` **once**. Write it
+down or use **Save as file** and keep it somewhere safe away from the computer.
+
+- Forgot the password → on the login screen click **Forgot password?**, enter the recovery code and a
+  new password. The app also shows the username, in case that was forgotten too.
+- Each code works **once**: after a reset a new code is shown — save that one instead.
+- **Settings → Security** lets you change the password or create a new recovery code (needs the current password).
+- After 5 wrong attempts at the password or the code, the app makes you wait before trying again.
+- Lost both the password *and* the code? The last resort is still to open `factory-ledger.sqlite` in
+  DB Browser for SQLite and delete the row in the `users` table (business data is kept) — the next
+  launch shows "Set up the admin account" again.

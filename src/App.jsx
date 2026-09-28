@@ -1,253 +1,35 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
-  Package, ShoppingCart, Users, BarChart3, Plus, Globe, X, Trash2,
-  Pencil, ArrowUpCircle, ArrowDownCircle, Search, Download, ChevronLeft,
-  ChevronRight, Wallet, Scissors, Printer, FileText
+  Package, ShoppingCart, Users, BarChart3, Globe, X, Wallet, Scissors, FileText, Settings, Info,
+  Receipt, Boxes, Keyboard, RefreshCw,
 } from "lucide-react";
+import { T, fill } from "./i18n.js";
+import {
+  COLORS, uid, todayISO, thisMonthKey, monthKey, balanceImpact, errMsg, companyInfo, rangeFor, isModalOpen,
+  Btn, Modal,
+} from "./ui.jsx";
+import { buildXlsx } from "./xlsx.js";
+import { makeReportSheets } from "./reportSheets.js";
+import { TxList, TxModal, ExpensesView, ExpenseModal } from "./entries.jsx";
+import { PartiesView, PaymentModal, PartyModal, PartyDetailModal } from "./parties.jsx";
+import { CatalogView, CatalogModal } from "./catalog.jsx";
+import { Dashboard, ReportsView } from "./dashboard.jsx";
+import { InvoicesView } from "./invoices.jsx";
+import { SettingsView, AboutModal, ShortcutsModal, ToastHost, updateText } from "./settings.jsx";
+import { AuthScreen } from "./auth.jsx";
 
-const COLORS = {
-  bg: "#F7F5EF",
-  surface: "#FFFFFF",
-  ink: "#232840",
-  inkSoft: "#4A4E68",
-  accent: "#C9972E",
-  accentSoft: "#F1E4C4",
-  in: "#2F7A5C",
-  inSoft: "#E3F0E9",
-  out: "#B84A2F",
-  outSoft: "#F6E4DE",
-  border: "#E3DFD3",
-  muted: "#8A8577",
-};
-
-const T = {
-  ar: {
-    appName: "دفتر المصنع", tagline: "إدارة المشتريات والمبيعات والعملاء",
-    dashboard: "الرئيسية", purchases: "المشتريات", sales: "المبيعات",
-    parties: "العملاء والموردون", reports: "التقارير",
-    addPurchase: "إضافة مشترى", addSale: "إضافة عملية بيع", addParty: "إضافة طرف",
-    date: "التاريخ", supplier: "المورد", client: "العميل", party: "الطرف",
-    description: "الوصف", quantity: "الكمية", unitPrice: "سعر الوحدة",
-    total: "الإجمالي", paid: "المدفوع الآن", remaining: "المتبقي",
-    notes: "ملاحظات", save: "حفظ", cancel: "إلغاء", name: "الاسم",
-    phone: "الهاتف", type: "النوع", clientType: "عميل", supplierType: "مورد",
-    bothType: "عميل ومورد", balance: "الرصيد", theyOweYou: "لك عنده",
-    youOweThem: "له عندك", settled: "لا يوجد رصيد", recordPayment: "تسجيل دفعة",
-    paymentAmount: "المبلغ", paymentIn: "دفعة من العميل", paymentOut: "دفعة لمورد",
-    selectParty: "اختر الطرف", newParty: "طرف جديد...", month: "الشهر",
-    totalSales: "إجمالي المبيعات", totalPurchases: "إجمالي المشتريات",
-    moneyIn: "وارد نقدي", moneyOut: "منصرف نقدي", netCashFlow: "صافي التدفق",
-    outstandingReceivables: "مستحق لك من العملاء", outstandingPayables: "مستحق عليك للموردين",
-    transactionsThisMonth: "عمليات هذا الشهر", noData: "لا توجد بيانات بعد",
-    delete: "حذف", edit: "تعديل", search: "بحث...", all: "الكل",
-    exportCsv: "تصدير CSV", currency: "ج.م", recent: "أحدث العمليات",
-    confirmDelete: "هل تريد حذف هذا السجل؟", yes: "نعم", no: "لا",
-    history: "سجل العمليات", noHistory: "لا توجد عمليات لهذا الطرف",
-    thisMonth: "هذا الشهر", invoiced: "قيمة الفواتير", collected: "المحصل",
-    close: "إغلاق", partyRequired: "من فضلك أدخل اسم الطرف",
-    amountRequired: "من فضلك أدخل المبلغ", quickStats: "نظرة سريعة",
-    numClients: "عدد العملاء", numSuppliers: "عدد الموردين",
-    snapshot: "لقطة حتى اليوم", loading: "جاري التحميل...",
-    username: "اسم المستخدم", password: "كلمة المرور", confirmPassword: "تأكيد كلمة المرور",
-    createAdminAccount: "إنشاء حساب المدير", loginButton: "تسجيل الدخول",
-    invalidCredentials: "بيانات الدخول غير صحيحة", logout: "تسجيل الخروج",
-    welcomeBack: "أدخل بياناتك لتسجيل الدخول", setupAdminDesc: "قم بإنشاء حساب المدير لأول مرة",
-    passwordsMustMatch: "كلمتا المرور غير متطابقتين", passwordTooShort: "كلمة المرور قصيرة جدًا (٤ أحرف على الأقل)",
-    fillAllFields: "من فضلك أدخل جميع الحقول",
-    downloadExcel: "تحميل تقرير Excel", summaryReport: "تقرير ملخص",
-    salesReportTitle: "تقرير المبيعات", purchasesReportTitle: "تقرير المشتريات", balancesReport: "تقرير الأرصدة",
-    item: "البند", value: "القيمة", statusCol: "الحالة", generatedOn: "تاريخ الإصدار",
-    invoicesTab: "الفواتير", chooseParty: "اختر العميل أو المورد", dateFrom: "من تاريخ", dateTo: "إلى تاريخ",
-    invoiceDetailed: "تفصيلي", invoiceSummary: "ملخص", printInvoice: "طباعة", statementOfAccount: "كشف حساب",
-    openingBalance: "الرصيد الافتتاحي", closingBalance: "الرصيد الختامي", period: "الفترة",
-    debit: "مدين (عليه)", credit: "دائن (له)", runningBalance: "الرصيد", noTxInPeriod: "لا توجد عمليات في هذه الفترة",
-    pickPartyFirst: "اختر عميل أو مورد أولًا", totalDebit: "إجمالي المدين", totalCredit: "إجمالي الدائن",
-  },
-  en: {
-    appName: "Factory Ledger", tagline: "Purchases, sales and client balances",
-    dashboard: "Dashboard", purchases: "Purchases", sales: "Sales",
-    parties: "Clients & Suppliers", reports: "Reports",
-    addPurchase: "Add purchase", addSale: "Add sale", addParty: "Add party",
-    date: "Date", supplier: "Supplier", client: "Client", party: "Party",
-    description: "Description", quantity: "Quantity", unitPrice: "Unit price",
-    total: "Total", paid: "Paid now", remaining: "Remaining",
-    notes: "Notes", save: "Save", cancel: "Cancel", name: "Name",
-    phone: "Phone", type: "Type", clientType: "Client", supplierType: "Supplier",
-    bothType: "Client & supplier", balance: "Balance", theyOweYou: "Owes you",
-    youOweThem: "You owe", settled: "Settled", recordPayment: "Record payment",
-    paymentAmount: "Amount", paymentIn: "Payment from client", paymentOut: "Payment to supplier",
-    selectParty: "Select party", newParty: "New party...", month: "Month",
-    totalSales: "Total sales", totalPurchases: "Total purchases",
-    moneyIn: "Money in", moneyOut: "Money out", netCashFlow: "Net cash flow",
-    outstandingReceivables: "Owed to you by clients", outstandingPayables: "Owed by you to suppliers",
-    transactionsThisMonth: "Transactions this month", noData: "No data yet",
-    delete: "Delete", edit: "Edit", search: "Search...", all: "All",
-    exportCsv: "Export CSV", currency: "EGP", recent: "Recent transactions",
-    confirmDelete: "Delete this record?", yes: "Yes", no: "No",
-    history: "Transaction history", noHistory: "No transactions for this party",
-    thisMonth: "This month", invoiced: "Invoiced", collected: "Collected",
-    close: "Close", partyRequired: "Please enter a party name",
-    amountRequired: "Please enter an amount", quickStats: "At a glance",
-    numClients: "Clients", numSuppliers: "Suppliers",
-    snapshot: "Snapshot as of today", loading: "Loading...",
-    username: "Username", password: "Password", confirmPassword: "Confirm password",
-    createAdminAccount: "Create admin account", loginButton: "Log in",
-    invalidCredentials: "Invalid username or password", logout: "Log out",
-    welcomeBack: "Enter your details to log in", setupAdminDesc: "Set up the admin account for first use",
-    passwordsMustMatch: "Passwords don't match", passwordTooShort: "Password is too short (min 4 characters)",
-    fillAllFields: "Please fill in all fields",
-    downloadExcel: "Download Excel report", summaryReport: "Summary report",
-    salesReportTitle: "Sales report", purchasesReportTitle: "Purchases report", balancesReport: "Balances report",
-    item: "Item", value: "Value", statusCol: "Status", generatedOn: "Generated on",
-    invoicesTab: "Invoices", chooseParty: "Choose a client or supplier", dateFrom: "From date", dateTo: "To date",
-    invoiceDetailed: "Detailed", invoiceSummary: "Summary", printInvoice: "Print", statementOfAccount: "Statement of Account",
-    openingBalance: "Opening balance", closingBalance: "Closing balance", period: "Period",
-    debit: "Debit (they owe)", credit: "Credit (paid/received)", runningBalance: "Balance", noTxInPeriod: "No transactions in this period",
-    pickPartyFirst: "Choose a client or supplier first", totalDebit: "Total debit", totalCredit: "Total credit",
-  },
-};
-
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const monthKey = (d) => (d || "").slice(0, 7);
-const thisMonthKey = () => todayISO().slice(0, 7);
-
-function fmtMoney(n, lang) {
-  const v = Math.round((Number(n) || 0) * 100) / 100;
-  const s = v.toLocaleString(lang === "ar" ? "ar-EG" : "en-US", { maximumFractionDigits: 2 });
-  return lang === "ar" ? `${s} ${T.ar.currency}` : `${T.en.currency} ${s}`;
-}
-
-function balanceImpact(t) {
-  if (t.kind === "sale") return t.total - t.paid;
-  if (t.kind === "purchase") return -(t.total - t.paid);
-  if (t.kind === "payment_in") return -t.paid;
-  if (t.kind === "payment_out") return t.paid;
-  return 0;
-}
-
-function StitchDivider() {
-  return (
-    <svg width="100%" height="8" style={{ display: "block", margin: "4px 0" }}>
-      <line x1="0" y1="4" x2="100%" y2="4" stroke={COLORS.accent} strokeWidth="1.5"
-        strokeDasharray="5,5" opacity="0.55" />
-    </svg>
-  );
-}
-
-function Badge({ children, color, bg }) {
-  return (
-    <span style={{
-      display: "inline-block", padding: "2px 10px", borderRadius: 999,
-      fontSize: 12, fontWeight: 600, color, background: bg, whiteSpace: "nowrap",
-    }}>{children}</span>
-  );
-}
-
-function Btn({ children, onClick, variant = "primary", style, disabled }) {
-  const base = {
-    padding: "9px 16px", borderRadius: 8, fontSize: 14, fontWeight: 600,
-    cursor: disabled ? "not-allowed" : "pointer", border: "none",
-    display: "inline-flex", alignItems: "center", gap: 6, opacity: disabled ? 0.5 : 1,
-    transition: "transform 0.1s",
-  };
-  const variants = {
-    primary: { background: COLORS.ink, color: "#fff" },
-    accent: { background: COLORS.accent, color: "#fff" },
-    ghost: { background: "transparent", color: COLORS.ink, border: `1px solid ${COLORS.border}` },
-    danger: { background: COLORS.outSoft, color: COLORS.out },
-  };
-  return (
-    <button disabled={disabled} onClick={disabled ? undefined : onClick}
-      style={{ ...base, ...variants[variant], ...style }}
-      onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.97)")}
-      onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
-      onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}>
-      {children}
-    </button>
-  );
-}
-
-function Input({ label, ...props }) {
-  return (
-    <label style={{ display: "block", marginBottom: 12 }}>
-      {label && <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 4, fontWeight: 600 }}>{label}</div>}
-      <input {...props} style={{
-        width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${COLORS.border}`,
-        fontSize: 14, boxSizing: "border-box", background: "#FCFBF8", color: COLORS.ink, fontFamily: "inherit",
-        ...(props.style || {}),
-      }} />
-    </label>
-  );
-}
-
-function Select({ label, children, ...props }) {
-  return (
-    <label style={{ display: "block", marginBottom: 12 }}>
-      {label && <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 4, fontWeight: 600 }}>{label}</div>}
-      <select {...props} style={{
-        width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${COLORS.border}`,
-        fontSize: 14, boxSizing: "border-box", background: "#FCFBF8", color: COLORS.ink, fontFamily: "inherit",
-      }}>{children}</select>
-    </label>
-  );
-}
-
-function Modal({ title, onClose, children, wide }) {
-  return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(35,40,64,0.45)", zIndex: 50,
-      display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
-    }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{
-        background: COLORS.surface, borderRadius: 14, padding: 24, width: "100%",
-        maxWidth: wide ? 640 : 460, maxHeight: "88vh", overflowY: "auto",
-        boxShadow: "0 20px 60px rgba(35,40,64,0.25)",
-      }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h3 style={{ margin: 0, fontSize: 18, color: COLORS.ink, fontWeight: 800 }}>{title}</h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.muted }}>
-            <X size={20} />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function MetricCard({ label, value, tone }) {
-  const toneColor = tone === "in" ? COLORS.in : tone === "out" ? COLORS.out : COLORS.ink;
-  return (
-    <div style={{
-      background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12,
-      padding: "16px 18px", flex: "1 1 180px", minWidth: 160,
-    }}>
-      <div style={{ fontSize: 12.5, color: COLORS.muted, fontWeight: 700, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.3 }}>{label}</div>
-      <div style={{ fontSize: 21, fontWeight: 800, color: toneColor, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
-    </div>
-  );
-}
-
-function ReportCard({ title, desc, label, onClick }) {
-  return (
-    <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 16 }}>
-      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{title}</div>
-      <div style={{ fontSize: 12, color: COLORS.muted, marginBottom: 12 }}>{desc}</div>
-      <Btn variant="accent" style={{ width: "100%", justifyContent: "center" }} onClick={onClick}>
-        <Download size={15} /> {label}
-      </Btn>
-    </div>
-  );
-}
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 export default function FactoryLedger() {
   const [lang, setLang] = useState("ar");
   const t = T[lang];
   const isRTL = lang === "ar";
+  const today = todayISO();
 
   const [parties, setParties] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [catalog, setCatalog] = useState([]);
+  const [settings, setSettings] = useState({});
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState("dashboard");
 
@@ -255,24 +37,42 @@ export default function FactoryLedger() {
   const [hasAdmin, setHasAdmin] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
 
-  const [txModal, setTxModal] = useState(null); // { kind: 'purchase'|'sale' }
-  const [payModal, setPayModal] = useState(null); // { party }
+  const [txModal, setTxModal] = useState(null); // { kind: 'purchase'|'sale', editId? }
+  const [expenseModal, setExpenseModal] = useState(null); // { editId? }
+  const [payModal, setPayModal] = useState(null); // { party, editId? }
   const [partyModal, setPartyModal] = useState(false);
   const [partyDetail, setPartyDetail] = useState(null);
-  const [confirmDel, setConfirmDel] = useState(null); // { kind:'tx'|'party', id }
+  const [catalogModal, setCatalogModal] = useState(null); // { edit? }
+  const [confirmDel, setConfirmDel] = useState(null); // { kind:'tx'|'party'|'catalog', id }
   const [search, setSearch] = useState("");
+  const [ranges, setRanges] = useState(() => ({
+    purchase: { preset: "all", ...rangeFor("all") },
+    sale: { preset: "all", ...rangeFor("all") },
+    expense: { preset: "thisMonth", ...rangeFor("thisMonth") },
+  }));
   const [reportMonth, setReportMonth] = useState(thisMonthKey());
+  const [agingSide, setAgingSide] = useState("receivable");
   const [invoicePartyId, setInvoicePartyId] = useState("");
   const [invoiceFrom, setInvoiceFrom] = useState(thisMonthKey() + "-01");
   const [invoiceTo, setInvoiceTo] = useState(todayISO());
   const [invoiceMode, setInvoiceMode] = useState("detailed");
+  const [toasts, setToasts] = useState([]);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [updStatus, setUpdStatus] = useState({ state: "idle" });
+  const printRef = useRef(null);
+  const updateToastShown = useRef(false);
+
+  function notify(message, type = "success", action) {
+    const id = uid();
+    setToasts((prev) => [...prev.slice(-2), { id, message, type, action }]);
+    setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), type === "error" ? 8000 : action ? 9000 : 4500);
+  }
+  const dismissToast = (id) => setToasts((prev) => prev.filter((x) => x.id !== id));
 
   useEffect(() => {
     (async () => {
-      try {
-        const has = await window.auth.hasAdmin();
-        setHasAdmin(!!has);
-      } catch (e) { /* ignore */ }
+      try { setHasAdmin(!!(await window.auth.hasAdmin())); } catch (e) { /* ignore */ }
       setAuthChecked(true);
     })();
   }, []);
@@ -281,237 +81,310 @@ export default function FactoryLedger() {
     if (!loggedIn) return;
     (async () => {
       try {
-        const [p, tx] = await Promise.all([window.db.getParties(), window.db.getTransactions()]);
+        const [p, tx, st, cat] = await Promise.all([
+          window.db.getParties(), window.db.getTransactions(),
+          window.settings ? window.settings.get() : Promise.resolve({}),
+          window.db.getCatalog ? window.db.getCatalog() : Promise.resolve([]),
+        ]);
         setParties(p || []);
         setTransactions(tx || []);
-      } catch (e) { /* no data yet */ }
+        setSettings(st || {});
+        setCatalog(cat || []);
+      } catch (e) { notify(errMsg(e), "error"); }
       setLoaded(true);
     })();
   }, [loggedIn]);
+
+  // Automatic updates: follow the status sent by the main process.
+  useEffect(() => {
+    if (!window.updates) return undefined;
+    window.updates.getStatus().then((s) => s && setUpdStatus(s)).catch(() => {});
+    return window.updates.onStatus((s) => setUpdStatus(s));
+  }, []);
+  useEffect(() => {
+    if (updStatus.state === "ready" && loggedIn && !updateToastShown.current) {
+      updateToastShown.current = true;
+      notify(fill(t.updateReadyToast, { v: updStatus.version }), "success",
+        { label: t.restartToUpdate, onClick: () => window.updates.install() });
+    }
+  }, [updStatus.state, loggedIn]);
 
   function logout() {
     setLoggedIn(false);
     setLoaded(false);
     setParties([]);
     setTransactions([]);
+    setCatalog([]);
     setTab("dashboard");
   }
 
-  const partyBalance = (partyId) =>
-    transactions.filter((x) => x.partyId === partyId).reduce((s, x) => s + balanceImpact(x), 0);
-
-  const partiesWithBalance = useMemo(
-    () => parties.map((p) => ({ ...p, balance: partyBalance(p.id) })),
-    [parties, transactions]
-  );
+  const partiesWithBalance = useMemo(() => {
+    const bal = new Map();
+    for (const x of transactions) if (x.partyId) bal.set(x.partyId, (bal.get(x.partyId) || 0) + balanceImpact(x));
+    return parties.map((p) => ({ ...p, balance: bal.get(p.id) || 0 }));
+  }, [parties, transactions]);
 
   const totalReceivable = partiesWithBalance.reduce((s, p) => s + Math.max(p.balance, 0), 0);
   const totalPayable = partiesWithBalance.reduce((s, p) => s + Math.max(-p.balance, 0), 0);
-
   const monthTx = (mk) => transactions.filter((x) => monthKey(x.date) === mk);
-  const currentMonthTx = monthTx(thisMonthKey());
-  const moneyInThisMonth = currentMonthTx.filter((x) => x.kind === "sale" || x.kind === "payment_in").reduce((s, x) => s + x.paid, 0);
-  const moneyOutThisMonth = currentMonthTx.filter((x) => x.kind === "purchase" || x.kind === "payment_out").reduce((s, x) => s + x.paid, 0);
 
-  function addParty(name, type, phone) {
-    const p = { id: uid(), name, type, phone: phone || "" };
-    setParties((prev) => [...prev, p]);
-    window.db.upsertParty(p).catch((err) => { console.error(err); alert("Save failed: " + (err && err.message ? err.message : err)); });
-    return p;
+  /* ---------- saving ---------- */
+  function reportSave(promise, silent) {
+    promise.then(
+      () => { if (!silent) notify(t.savedOk); },
+      (err) => { console.error(err); notify(`${t.saveFailed}: ${errMsg(err)}`, "error"); }
+    );
+  }
+  function reportDelete(promise) {
+    promise.then(
+      () => notify(t.deletedOk),
+      (err) => { console.error(err); notify(`${t.deleteFailed}: ${errMsg(err)}`, "error"); }
+    );
   }
 
+  function addParty(name, type, phone, silent) {
+    const p = { id: uid(), name, type, phone: phone || "" };
+    setParties((prev) => [...prev, p]);
+    reportSave(window.db.upsertParty(p), silent);
+    return p;
+  }
   function updateParty(id, name, type, phone) {
     const p = { id, name, type, phone: phone || "" };
     setParties((prev) => prev.map((x) => (x.id === id ? p : x)));
-    window.db.upsertParty(p).catch((err) => { console.error(err); alert("Save failed: " + (err && err.message ? err.message : err)); });
+    reportSave(window.db.upsertParty(p));
   }
-
   function findOrCreateParty(name, defaultType) {
     const existing = parties.find((p) => p.name.trim().toLowerCase() === name.trim().toLowerCase());
     if (existing) return existing;
-    return addParty(name.trim(), defaultType);
+    return addParty(name.trim(), defaultType, "", true);
+  }
+
+  function storeTransaction(record, editId) {
+    setTransactions((prev) => (editId ? prev.map((x) => (x.id === editId ? record : x)) : [record, ...prev])
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)));
+    reportSave(window.db.upsertTransaction(record));
   }
 
   function saveTransaction(kind, form, editId) {
     let partyId = form.partyId;
-    if (partyId === "__new__") {
-      const p = findOrCreateParty(form.newPartyName, kind === "purchase" ? "supplier" : "client");
-      partyId = p.id;
-    }
-    const total = kind === "purchase" || kind === "sale"
-      ? (Number(form.quantity) || 0) * (Number(form.unitPrice) || 0)
-      : Number(form.amount) || 0;
-    const paid = kind === "purchase" || kind === "sale" ? (Number(form.paid) || 0) : total;
-    const record = {
-      id: editId || uid(), kind, date: form.date || todayISO(), partyId,
-      description: form.description || "", quantity: Number(form.quantity) || 0,
-      unitPrice: Number(form.unitPrice) || 0, total, paid, notes: form.notes || "",
-    };
-    if (editId) {
-      setTransactions((prev) => prev.map((x) => (x.id === editId ? record : x)));
+    if (partyId === "__new__") partyId = findOrCreateParty(form.newPartyName, kind === "purchase" ? "supplier" : "client").id;
+    let record;
+    if (kind === "purchase" || kind === "sale") {
+      const items = form.items.map((it) => ({ ...it, total: round2(it.quantity * it.unitPrice) }));
+      const total = round2(items.reduce((s, it) => s + it.total, 0));
+      const single = items.length === 1 ? items[0] : null;
+      record = {
+        id: editId || uid(), kind, date: form.date || todayISO(), partyId,
+        description: items.map((it) => it.description).filter(Boolean).join(isRTL ? "، " : ", "),
+        quantity: single ? single.quantity : items.reduce((s, it) => s + it.quantity, 0),
+        unitPrice: single ? single.unitPrice : 0,
+        total, paid: round2(form.paid), notes: form.notes || "", items,
+      };
     } else {
-      setTransactions((prev) => [record, ...prev]);
+      const amount = round2(form.amount);
+      record = {
+        id: editId || uid(), kind, date: form.date || todayISO(), partyId, description: "", quantity: 0, unitPrice: 0,
+        total: amount, paid: amount, notes: form.notes || "", items: [],
+      };
     }
-    window.db.upsertTransaction(record).catch((err) => { console.error(err); alert("Save failed: " + (err && err.message ? err.message : err)); });
+    storeTransaction(record, editId);
+  }
+
+  function saveExpense(form, editId) {
+    const amount = round2(form.amount);
+    storeTransaction({
+      id: editId || uid(), kind: "expense", date: form.date || todayISO(), partyId: null, category: form.category || "other",
+      description: (form.description || "").trim(), quantity: 0, unitPrice: 0, total: amount, paid: amount,
+      notes: form.notes || "", items: [],
+    }, editId);
   }
 
   function deleteTransaction(id) {
     setTransactions((prev) => prev.filter((x) => x.id !== id));
-    window.db.deleteTransaction(id).catch((err) => { console.error(err); alert("Delete failed: " + (err && err.message ? err.message : err)); });
+    reportDelete(window.db.deleteTransaction(id));
   }
   function deleteParty(id) {
     setParties((prev) => prev.filter((p) => p.id !== id));
     setTransactions((prev) => prev.filter((x) => x.partyId !== id));
-    window.db.deleteParty(id).catch((err) => { console.error(err); alert("Delete failed: " + (err && err.message ? err.message : err)); });
+    reportDelete(window.db.deleteParty(id));
+  }
+  function saveCatalogItem(item) {
+    setCatalog((prev) => [...prev.filter((c) => c.id !== item.id), item].sort((a, b) => a.name.localeCompare(b.name)));
+    reportSave(window.db.upsertCatalog(item));
+  }
+  function deleteCatalogItem(id) {
+    setCatalog((prev) => prev.filter((c) => c.id !== id));
+    setTransactions((prev) => prev.map((x) => (x.items && x.items.some((i) => i.catalogId === id)
+      ? { ...x, items: x.items.map((i) => (i.catalogId === id ? { ...i, catalogId: null } : i)) } : x)));
+    reportDelete(window.db.deleteCatalog(id));
   }
 
-  
-
-  function escHtml(s) {
-    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  async function saveSettings(values) {
+    try {
+      await window.settings.save(values);
+      setSettings((prev) => ({ ...prev, ...values }));
+      notify(t.settingsSaved);
+      return true;
+    } catch (err) {
+      notify(`${t.saveFailed}: ${errMsg(err)}`, "error");
+      return false;
+    }
   }
 
-  function excelDoc(title, headers, rows) {
-    const isRTL = lang === "ar";
-    const align = isRTL ? "right" : "left";
-    const style = `body{font-family:Arial,sans-serif;} table{border-collapse:collapse;} ` +
-      `th{background:#232840;color:#ffffff;padding:8px 12px;border:1px solid #999999;font-size:13px;text-align:${align};} ` +
-      `td{padding:6px 12px;border:1px solid #cccccc;font-size:12px;text-align:${align};} ` +
-      `.ttl{font-size:18px;font-weight:bold;color:#232840;padding:6px 0;} .sub{font-size:12px;color:#8A8577;padding-bottom:10px;} ` +
-      `.posv{color:#2F7A5C;font-weight:bold;} .negv{color:#B84A2F;font-weight:bold;}`;
-    const head = `<tr>${headers.map((h) => `<th>${escHtml(h)}</th>`).join("")}</tr>`;
-    const body = rows.map((r) => `<tr>${r.map((c) => {
-      let cls = ""; let val = c;
-      if (c && typeof c === "object") { cls = c.cls ? ` class="${c.cls}"` : ""; val = c.text; }
-      return `<td${cls}>${escHtml(val)}</td>`;
-    }).join("")}</tr>`).join("");
-    return `<html${isRTL ? ' dir="rtl"' : ""}><head><meta charset="UTF-8"/><style>${style}</style></head><body>` +
-      `<div class="ttl">${escHtml(title)}</div><div class="sub">${escHtml(t.generatedOn)}: ${escHtml(todayISO())}</div>` +
-      `<table><thead>${head}</thead><tbody>${body}</tbody></table></body></html>`;
-  }
+  /* ---------- Excel reports ---------- */
+  const company = companyInfo(settings, lang, t);
+  const sheets = makeReportSheets({ t, isRTL, company, parties, partiesWithBalance, transactions, totalReceivable, totalPayable, today });
 
-  function downloadExcelFile(filename, htmlContent) {
-    const blob = new Blob(["\ufeff" + htmlContent], { type: "application/vnd.ms-excel" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
+  async function saveWorkbook(fileName, title, sheetList) {
+    try {
+      const bytes = buildXlsx({ sheets: sheetList, title, creator: company.name, currency: t.currency });
+      const res = await window.files.save(fileName, bytes, [{ name: "Excel", extensions: ["xlsx"] }]);
+      if (res && res.ok) notify(t.excelSaved, "success", { label: t.open, onClick: () => window.files.open(res.filePath) });
+    } catch (err) {
+      console.error(err);
+      notify(`${t.saveFailed}: ${errMsg(err)}`, "error");
+    }
   }
+  const mk = reportMonth;
+  const exports = {
+    summary: () => saveWorkbook(`summary-${mk}.xlsx`, t.summaryReport, [sheets.summary(mk)]),
+    sales: () => saveWorkbook(`sales-${mk}.xlsx`, t.salesReportTitle, [sheets.trade("sale", mk)]),
+    purchases: () => saveWorkbook(`purchases-${mk}.xlsx`, t.purchasesReportTitle, [sheets.trade("purchase", mk)]),
+    expenses: () => saveWorkbook(`expenses-${mk}.xlsx`, t.expensesReport, [sheets.expenses(mk)]),
+    balances: () => saveWorkbook(`balances-${today}.xlsx`, t.balancesReport, [sheets.balances()]),
+    aging: () => saveWorkbook(`aging-${agingSide}-${today}.xlsx`, t.agingReport, [sheets.aging(agingSide)]),
+    all: () => saveWorkbook(`monthly-report-${mk}.xlsx`, `${t.reports} — ${mk}`, [
+      sheets.summary(mk), sheets.trade("sale", mk), sheets.trade("purchase", mk), sheets.expenses(mk),
+      sheets.balances(), sheets.aging("receivable"), sheets.aging("payable"),
+    ]),
+  };
 
-  function txRowsForExcel(list) {
-    return list.map((x) => {
-      const p = parties.find((pp) => pp.id === x.partyId);
-      return [x.date, p ? p.name : "", x.description || "", x.quantity || "", x.unitPrice || "",
-        { text: fmtMoney(x.total, lang) }, { text: fmtMoney(x.paid, lang), cls: "posv" },
-        { text: fmtMoney(x.total - x.paid, lang), cls: (x.total - x.paid) > 0 ? "negv" : "" }, x.notes || ""];
-    });
-  }
-
-  function exportSummaryExcel() {
-    const mk = reportMonth;
-    const tx = monthTx(mk);
-    const moneyIn = tx.filter((x) => x.kind === "sale" || x.kind === "payment_in").reduce((s, x) => s + x.paid, 0);
-    const moneyOut = tx.filter((x) => x.kind === "purchase" || x.kind === "payment_out").reduce((s, x) => s + x.paid, 0);
-    const totalSalesInvoiced = tx.filter((x) => x.kind === "sale").reduce((s, x) => s + x.total, 0);
-    const totalPurchasesInvoiced = tx.filter((x) => x.kind === "purchase").reduce((s, x) => s + x.total, 0);
-    const headers = [t.item, t.value];
-    const rows = [
-      [t.moneyIn, { text: fmtMoney(moneyIn, lang), cls: "posv" }],
-      [t.moneyOut, { text: fmtMoney(moneyOut, lang), cls: "negv" }],
-      [t.netCashFlow, { text: fmtMoney(moneyIn - moneyOut, lang), cls: (moneyIn - moneyOut) >= 0 ? "posv" : "negv" }],
-      [`${t.totalSales} (${t.invoiced})`, fmtMoney(totalSalesInvoiced, lang)],
-      [`${t.totalPurchases} (${t.invoiced})`, fmtMoney(totalPurchasesInvoiced, lang)],
-    ];
-    downloadExcelFile(`summary-${mk}.xls`, excelDoc(`${t.summaryReport} — ${mk}`, headers, rows));
-  }
-
-  function exportSalesExcel() {
-    const mk = reportMonth;
-    const list = monthTx(mk).filter((x) => x.kind === "sale");
-    const headers = [t.date, t.client, t.description, t.quantity, t.unitPrice, t.total, t.paid, t.remaining, t.notes];
-    downloadExcelFile(`sales-${mk}.xls`, excelDoc(`${t.salesReportTitle} — ${mk}`, headers, txRowsForExcel(list)));
-  }
-
-  function exportPurchasesExcel() {
-    const mk = reportMonth;
-    const list = monthTx(mk).filter((x) => x.kind === "purchase");
-    const headers = [t.date, t.supplier, t.description, t.quantity, t.unitPrice, t.total, t.paid, t.remaining, t.notes];
-    downloadExcelFile(`purchases-${mk}.xls`, excelDoc(`${t.purchasesReportTitle} — ${mk}`, headers, txRowsForExcel(list)));
-  }
-
-  function exportBalancesExcel() {
-    const headers = [t.name, t.type, t.statusCol, t.balance || t.theyOweYou];
-    const rows = partiesWithBalance.map((p) => {
-      const typeLabel = p.type === "client" ? t.clientType : p.type === "supplier" ? t.supplierType : t.bothType;
-      const statusLabel = p.balance > 0 ? t.theyOweYou : p.balance < 0 ? t.youOweThem : t.settled;
-      return [p.name, typeLabel, statusLabel, { text: fmtMoney(Math.abs(p.balance), lang), cls: p.balance > 0 ? "posv" : p.balance < 0 ? "negv" : "" }];
-    });
-    downloadExcelFile(`balances-${todayISO()}.xls`, excelDoc(`${t.balancesReport} — ${t.snapshot}`, headers, rows));
-  }
-
+  /* ---------- navigation & keyboard shortcuts ---------- */
   const navItems = [
     { key: "dashboard", label: t.dashboard, icon: BarChart3 },
     { key: "purchases", label: t.purchases, icon: Package },
     { key: "sales", label: t.sales, icon: ShoppingCart },
+    { key: "expenses", label: t.expenses, icon: Receipt },
     { key: "parties", label: t.parties, icon: Users },
+    { key: "catalog", label: t.catalog, icon: Boxes },
     { key: "reports", label: t.reports, icon: Wallet },
     { key: "invoices", label: t.invoicesTab, icon: FileText },
+    { key: "settings", label: t.settings, icon: Settings },
   ];
 
-  if (!authChecked) {
-    return <div style={{ padding: 40, textAlign: "center", color: COLORS.muted, fontFamily: "Cairo, sans-serif" }}>{t.loading}</div>;
+  function goTab(key) {
+    setTab(key);
+    setSearch("");
+  }
+  function openNew() {
+    if (tab === "purchases") setTxModal({ kind: "purchase" });
+    else if (tab === "expenses") setExpenseModal({});
+    else if (tab === "parties") setPartyModal(true);
+    else if (tab === "catalog") setCatalogModal({});
+    else setTxModal({ kind: "sale" });
+  }
+  function openParty(id) {
+    const p = parties.find((x) => x.id === id);
+    if (p) setPartyDetail(p);
+  }
+  function goAging() {
+    goTab("reports");
+    setTimeout(() => { const el = document.getElementById("aging"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 80);
   }
 
+  const keyState = useRef({});
+  keyState.current = { loggedIn: loggedIn && loaded, tab, openNew, goTab, navItems };
+  useEffect(() => {
+    const onKey = (e) => {
+      const st = keyState.current;
+      if (!st.loggedIn) return;
+      if (e.key === "F1") { e.preventDefault(); if (!isModalOpen()) setShortcutsOpen(true); return; }
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      // Use physical keys (e.code) so shortcuts also work with the Arabic keyboard layout.
+      const code = e.code;
+      if (isModalOpen()) { if (code === "KeyN" || code === "KeyP") e.preventDefault(); return; }
+      if (code === "KeyN") { e.preventDefault(); st.openNew(); }
+      else if (code === "KeyF") {
+        const el = document.querySelector("[data-search]");
+        if (el) { e.preventDefault(); el.focus(); el.select(); }
+      } else if (code === "KeyP") {
+        e.preventDefault();
+        if (st.tab === "invoices" && printRef.current) printRef.current();
+      } else if (/^Digit[1-9]$/.test(code) || /^Numpad[1-9]$/.test(code)) {
+        const item = st.navItems[Number(code.slice(-1)) - 1];
+        if (item) { e.preventDefault(); st.goTab(item.key); }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /* ---------- screens ---------- */
+  const loadingScreen = <div style={{ padding: 40, textAlign: "center", color: COLORS.muted, fontFamily: "'Cairo', sans-serif" }}>{t.loading}</div>;
+  if (!authChecked) return loadingScreen;
   if (!loggedIn) {
     return (
-      <AuthScreen
-        hasAdmin={hasAdmin} lang={lang} t={t}
+      <AuthScreen hasAdmin={hasAdmin} lang={lang} setLang={setLang} t={t}
         onCreated={() => { setHasAdmin(true); setLoggedIn(true); }}
-        onLoggedIn={() => setLoggedIn(true)}
-      />
+        onLoggedIn={() => setLoggedIn(true)} />
     );
   }
+  if (!loaded) return loadingScreen;
 
-  if (!loaded) {
-    return <div style={{ padding: 40, textAlign: "center", color: COLORS.muted, fontFamily: "Cairo, sans-serif" }}>{t.loading}</div>;
-  }
+  const sideBtn = {
+    display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8,
+    border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#D5D7E3",
+    cursor: "pointer", fontSize: 13, fontFamily: "inherit", marginTop: 6,
+  };
+  const editingTx = txModal && txModal.editId ? transactions.find((x) => x.id === txModal.editId) : null;
+  const editingExpense = expenseModal && expenseModal.editId ? transactions.find((x) => x.id === expenseModal.editId) : null;
+  const editTx = (tx) => {
+    if (tx.kind === "expense") setExpenseModal({ editId: tx.id });
+    else if (tx.kind === "purchase" || tx.kind === "sale") setTxModal({ kind: tx.kind, editId: tx.id });
+    else { const p = parties.find((x) => x.id === tx.partyId); if (p) setPayModal({ party: p, editId: tx.id }); }
+  };
+  const setRange = (kind) => (value) => setRanges((r) => ({ ...r, [kind]: value }));
 
   return (
-    <div dir={isRTL ? "rtl" : "ltr"} style={{
-      fontFamily: "'Cairo', sans-serif", background: COLORS.bg, minHeight: 600,
-      display: "flex", color: COLORS.ink, borderRadius: 16, overflow: "hidden",
-      border: `1px solid ${COLORS.border}`,
+    <div dir={isRTL ? "rtl" : "ltr"} className="app-root" style={{
+      fontFamily: "'Cairo', sans-serif", background: COLORS.bg, height: "100vh",
+      display: "flex", color: COLORS.ink, overflow: "hidden",
     }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap');
         @media print {
-          body * { visibility: hidden; }
-          #invoice-print-area, #invoice-print-area * { visibility: visible; }
-          #invoice-print-area {
-            position: absolute; inset: 0; width: 100% !important; max-width: 100% !important;
-            padding: 20px !important; margin: 0 !important; border: none !important; box-shadow: none !important;
+          html, body, #root, .app-root, .app-main {
+            height: auto !important; overflow: visible !important; background: #ffffff !important;
           }
+          .app-main { padding: 0 !important; }
           .no-print { display: none !important; }
-          @page { margin: 14mm; }
+          #invoice-print-area {
+            width: 100% !important; max-width: 100% !important; padding: 0 !important; margin: 0 !important;
+            border: none !important; box-shadow: none !important; border-radius: 0 !important;
+          }
+          #invoice-print-area tr { break-inside: avoid; }
+          #invoice-print-area .keep-together { break-inside: avoid; }
+          @page { size: A4; margin: 14mm 13mm 16mm; }
         }
       `}</style>
 
       {/* Sidebar */}
-      <div style={{
-        width: 210, background: COLORS.ink, color: "#fff", padding: "22px 14px",
-        display: "flex", flexDirection: "column", gap: 4, flexShrink: 0,
+      <div className="no-print" style={{
+        width: 214, background: COLORS.ink, color: "#fff", padding: "20px 14px", height: "100vh",
+        boxSizing: "border-box", overflowY: "auto", display: "flex", flexDirection: "column", gap: 2, flexShrink: 0,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, padding: "0 6px" }}>
           <Scissors size={20} color={COLORS.accent} />
           <div style={{ fontWeight: 800, fontSize: 16 }}>{t.appName}</div>
         </div>
-        <div style={{ fontSize: 11.5, color: "#9498B0", padding: "0 6px", marginBottom: 18 }}>{t.tagline}</div>
-        {navItems.map((item) => {
+        <div style={{ fontSize: 11.5, color: "#9498B0", padding: "0 6px", marginBottom: 14 }}>
+          {company.configured ? company.name : t.tagline}
+        </div>
+        {navItems.map((item, i) => {
           const Icon = item.icon;
           const active = tab === item.key;
           return (
-            <button key={item.key} onClick={() => setTab(item.key)} style={{
-              display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+            <button key={item.key} onClick={() => goTab(item.key)} title={`Ctrl+${i + 1}`} style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "9px 12px",
               borderRadius: 8, border: "none", cursor: "pointer", textAlign: isRTL ? "right" : "left",
               background: active ? "rgba(201,151,46,0.18)" : "transparent",
               color: active ? COLORS.accent : "#D5D7E3", fontSize: 14, fontWeight: 600, fontFamily: "inherit",
@@ -520,70 +393,81 @@ export default function FactoryLedger() {
             </button>
           );
         })}
-        <div style={{ flex: 1 }} />
-        <button onClick={() => setLang(lang === "ar" ? "en" : "ar")} style={{
-          display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 8,
-          border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#D5D7E3",
-          cursor: "pointer", fontSize: 13, fontFamily: "inherit",
-        }}>
-          <Globe size={15} /> {lang === "ar" ? "English" : "العربية"}
-        </button>
-        <button onClick={logout} style={{
-          display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 8,
-          border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "#D5D7E3",
-          cursor: "pointer", fontSize: 13, fontFamily: "inherit", marginTop: 6,
-        }}>
-          <X size={15} /> {t.logout}
-        </button>
+        <div style={{ flex: 1, minHeight: 12 }} />
+        {(updStatus.state === "ready" || updStatus.state === "downloading") && (
+          <div style={{ background: "rgba(201,151,46,0.16)", borderRadius: 10, padding: "10px 12px", marginBottom: 4 }}>
+            <div style={{ fontSize: 12, color: "#F1E4C4", lineHeight: 1.5 }}>{updateText(t, updStatus)}</div>
+            {updStatus.state === "ready" && (
+              <Btn variant="accent" onClick={() => window.updates.install()} style={{ width: "100%", justifyContent: "center", marginTop: 8, padding: "7px 10px", fontSize: 13 }}>
+                <RefreshCw size={14} /> {t.restartToUpdate}
+              </Btn>
+            )}
+          </div>
+        )}
+        <button onClick={() => setShortcutsOpen(true)} style={sideBtn} title="F1"><Keyboard size={15} /> {t.shortcuts}</button>
+        <button onClick={() => setLang(lang === "ar" ? "en" : "ar")} style={sideBtn}><Globe size={15} /> {lang === "ar" ? "English" : "العربية"}</button>
+        <button onClick={() => setAboutOpen(true)} style={sideBtn}><Info size={15} /> {t.about}</button>
+        <button onClick={logout} style={sideBtn}><X size={15} /> {t.logout}</button>
       </div>
 
       {/* Main */}
-      <div style={{ flex: 1, padding: 26, overflowY: "auto", maxHeight: 700 }}>
+      <div className="app-main" style={{ flex: 1, padding: 26, overflowY: "auto", height: "100vh", boxSizing: "border-box", minWidth: 0 }}>
         {tab === "dashboard" && (
-          <Dashboard t={t} lang={lang} moneyIn={moneyInThisMonth} moneyOut={moneyOutThisMonth}
-            totalReceivable={totalReceivable} totalPayable={totalPayable}
-            parties={parties} transactions={transactions.slice(0, 6)} />
+          <Dashboard t={t} lang={lang} transactions={transactions} parties={parties} partiesWithBalance={partiesWithBalance}
+            totalReceivable={totalReceivable} totalPayable={totalPayable} today={today}
+            onOpenParty={openParty} onGoAging={goAging} />
         )}
-        {tab === "purchases" && (
-          <TxList t={t} lang={lang} kind="purchase" transactions={transactions.filter((x) => x.kind === "purchase")}
-            parties={parties} onAdd={() => setTxModal({ kind: "purchase" })}
-            onDelete={(id) => setConfirmDel({ kind: "tx", id })}
-            onEdit={(tx) => setTxModal({ kind: tx.kind, editId: tx.id })}
-            search={search} setSearch={setSearch} />
-        )}
-        {tab === "sales" && (
-          <TxList t={t} lang={lang} kind="sale" transactions={transactions.filter((x) => x.kind === "sale")}
-            parties={parties} onAdd={() => setTxModal({ kind: "sale" })}
-            onDelete={(id) => setConfirmDel({ kind: "tx", id })}
-            onEdit={(tx) => setTxModal({ kind: tx.kind, editId: tx.id })}
-            search={search} setSearch={setSearch} />
+        {(tab === "purchases" || tab === "sales") && (() => {
+          const kind = tab === "purchases" ? "purchase" : "sale";
+          return (
+            <TxList key={kind} t={t} lang={lang} kind={kind} transactions={transactions.filter((x) => x.kind === kind)}
+              parties={parties} onAdd={() => setTxModal({ kind })}
+              onDelete={(id) => setConfirmDel({ kind: "tx", id })} onEdit={editTx}
+              search={search} setSearch={setSearch} range={ranges[kind]} setRange={setRange(kind)} />
+          );
+        })()}
+        {tab === "expenses" && (
+          <ExpensesView t={t} lang={lang} transactions={transactions} onAdd={() => setExpenseModal({})}
+            onEdit={editTx} onDelete={(id) => setConfirmDel({ kind: "tx", id })}
+            range={ranges.expense} setRange={setRange("expense")} search={search} setSearch={setSearch} />
         )}
         {tab === "parties" && (
           <PartiesView t={t} lang={lang} parties={partiesWithBalance}
             onAdd={() => setPartyModal(true)} onOpen={(p) => setPartyDetail(p)}
             search={search} setSearch={setSearch} />
         )}
+        {tab === "catalog" && (
+          <CatalogView t={t} lang={lang} catalog={catalog} transactions={transactions}
+            onAdd={() => setCatalogModal({})} onEdit={(c) => setCatalogModal({ edit: c })}
+            onDelete={(c) => setConfirmDel({ kind: "catalog", id: c.id })} search={search} setSearch={setSearch} />
+        )}
         {tab === "reports" && (
           <ReportsView t={t} lang={lang} reportMonth={reportMonth} setReportMonth={setReportMonth}
-            transactions={monthTx(reportMonth)} parties={parties}
-            totalReceivable={totalReceivable} totalPayable={totalPayable}
-            onExportSummary={exportSummaryExcel} onExportSales={exportSalesExcel}
-            onExportPurchases={exportPurchasesExcel} onExportBalances={exportBalancesExcel} />
+            transactions={monthTx(reportMonth)} allTransactions={transactions} parties={parties}
+            totalReceivable={totalReceivable} totalPayable={totalPayable} today={today}
+            agingSide={agingSide} setAgingSide={setAgingSide} onOpenParty={openParty} exports={exports} />
         )}
         {tab === "invoices" && (
           <InvoicesView t={t} lang={lang} parties={parties} transactions={transactions}
             partyId={invoicePartyId} setPartyId={setInvoicePartyId}
             dateFrom={invoiceFrom} setDateFrom={setInvoiceFrom}
             dateTo={invoiceTo} setDateTo={setInvoiceTo}
-            mode={invoiceMode} setMode={setInvoiceMode} />
+            mode={invoiceMode} setMode={setInvoiceMode}
+            settings={settings} notify={notify} onGoSettings={() => goTab("settings")} printRef={printRef} />
+        )}
+        {tab === "settings" && (
+          <SettingsView t={t} lang={lang} settings={settings} onSave={saveSettings} notify={notify} />
         )}
       </div>
 
       {txModal && (
-        <TxModal t={t} lang={lang} kind={txModal.kind} parties={parties}
-          editTx={txModal.editId ? transactions.find((x) => x.id === txModal.editId) : null}
+        <TxModal t={t} lang={lang} kind={txModal.kind} parties={parties} catalog={catalog} editTx={editingTx}
           onClose={() => setTxModal(null)}
           onSave={(form) => { saveTransaction(txModal.kind, form, txModal.editId); setTxModal(null); }} />
+      )}
+      {expenseModal && (
+        <ExpenseModal t={t} lang={lang} editTx={editingExpense} onClose={() => setExpenseModal(null)}
+          onSave={(form) => { saveExpense(form, expenseModal.editId); setExpenseModal(null); }} />
       )}
       {payModal && (
         <PaymentModal t={t} lang={lang} party={payModal.party}
@@ -601,615 +485,48 @@ export default function FactoryLedger() {
         <PartyModal t={t} lang={lang} editParty={typeof partyModal === "object" ? partyModal.edit : null}
           onClose={() => setPartyModal(false)}
           onSave={(name, type, phone) => {
-            if (typeof partyModal === "object" && partyModal.edit) {
-              updateParty(partyModal.edit.id, name, type, phone);
-            } else {
-              addParty(name, type, phone);
-            }
+            if (typeof partyModal === "object" && partyModal.edit) updateParty(partyModal.edit.id, name, type, phone);
+            else addParty(name, type, phone);
             setPartyModal(false);
           }} />
       )}
-      {partyDetail && !payModal && (
+      {catalogModal && (
+        <CatalogModal t={t} editItem={catalogModal.edit || null} onClose={() => setCatalogModal(null)}
+          onSave={(item) => { saveCatalogItem(item); setCatalogModal(null); }} />
+      )}
+      {partyDetail && !payModal && !txModal && !partyModal && (
         <PartyDetailModal t={t} lang={lang}
           party={partiesWithBalance.find((p) => p.id === partyDetail.id) || partyDetail}
           transactions={transactions.filter((x) => x.partyId === partyDetail.id)}
           parties={parties}
           onClose={() => setPartyDetail(null)}
-          onPay={() => { setPayModal({ party: partyDetail }); }}
+          onPay={() => setPayModal({ party: partyDetail })}
           onDeleteTx={(id) => setConfirmDel({ kind: "tx", id })}
-          onEditTx={(tx) => {
-            if (tx.kind === "purchase" || tx.kind === "sale") {
-              setTxModal({ kind: tx.kind, editId: tx.id });
-            } else {
-              setPayModal({ party: partyDetail, editId: tx.id });
-            }
-          }}
+          onEditTx={editTx}
           onDeleteParty={() => setConfirmDel({ kind: "party", id: partyDetail.id })}
           onEditParty={() => setPartyModal({ edit: parties.find((p) => p.id === partyDetail.id) || partyDetail })}
         />
       )}
       {confirmDel && (
-        <Modal title={t.confirmDelete} onClose={() => setConfirmDel(null)}>
+        <Modal title={confirmDel.kind === "catalog" ? t.confirmDeleteCatalog : t.confirmDelete} onClose={() => setConfirmDel(null)}>
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
             <Btn variant="ghost" onClick={() => setConfirmDel(null)}>{t.no}</Btn>
             <Btn variant="danger" onClick={() => {
               if (confirmDel.kind === "tx") deleteTransaction(confirmDel.id);
+              else if (confirmDel.kind === "catalog") deleteCatalogItem(confirmDel.id);
               else { deleteParty(confirmDel.id); setPartyDetail(null); }
               setConfirmDel(null);
             }}>{t.yes}, {t.delete}</Btn>
           </div>
         </Modal>
       )}
-    </div>
-  );
-}
-
-function Dashboard({ t, lang, moneyIn, moneyOut, totalReceivable, totalPayable, parties, transactions }) {
-  const net = moneyIn - moneyOut;
-  return (
-    <div>
-      <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 800 }}>{t.dashboard}</h2>
-      <div style={{ fontSize: 13, color: COLORS.muted, marginBottom: 16 }}>{t.thisMonth}</div>
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 22 }}>
-        <MetricCard label={t.moneyIn} value={fmtMoney(moneyIn, lang)} tone="in" />
-        <MetricCard label={t.moneyOut} value={fmtMoney(moneyOut, lang)} tone="out" />
-        <MetricCard label={t.netCashFlow} value={fmtMoney(net, lang)} tone={net >= 0 ? "in" : "out"} />
-      </div>
-      <StitchDivider />
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", margin: "18px 0 22px" }}>
-        <MetricCard label={t.outstandingReceivables} value={fmtMoney(totalReceivable, lang)} tone="in" />
-        <MetricCard label={t.outstandingPayables} value={fmtMoney(totalPayable, lang)} tone="out" />
-        <MetricCard label={t.numClients} value={parties.filter((p) => p.type !== "supplier").length} />
-        <MetricCard label={t.numSuppliers} value={parties.filter((p) => p.type !== "client").length} />
-      </div>
-      <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>{t.recent}</h3>
-      {transactions.length === 0 ? (
-        <Empty t={t} />
-      ) : (
-        <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, overflow: "hidden" }}>
-          {transactions.map((x, i) => (
-            <TxRow key={x.id} tx={x} lang={lang} parties={[]} t={t} last={i === transactions.length - 1} />
-          ))}
-        </div>
+      {aboutOpen && (
+        <AboutModal t={t} company={company} onClose={() => setAboutOpen(false)} updStatus={updStatus}
+          onCheckUpdates={() => window.updates && window.updates.check().then((s) => s && setUpdStatus(s)).catch(() => {})}
+          onInstallUpdate={() => window.updates && window.updates.install()} />
       )}
-    </div>
-  );
-}
-
-function Empty({ t }) {
-  return <div style={{ padding: 30, textAlign: "center", color: COLORS.muted, fontSize: 14 }}>{t.noData}</div>;
-}
-
-function TxRow({ tx, lang, t, last, partyName, onDelete, onEdit }) {
-  const isIn = tx.kind === "sale" || tx.kind === "payment_in";
-  const Icon = isIn ? ArrowUpCircle : ArrowDownCircle;
-  const label = { purchase: t.purchases, sale: t.sales, payment_in: t.paymentIn, payment_out: t.paymentOut }[tx.kind];
-  return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
-      borderBottom: last ? "none" : `1px solid ${COLORS.border}`,
-    }}>
-      <Icon size={18} color={isIn ? COLORS.in : COLORS.out} style={{ flexShrink: 0 }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {partyName || label} {tx.description ? `— ${tx.description}` : ""}
-        </div>
-        <div style={{ fontSize: 12, color: COLORS.muted }}>{tx.date} · {label}</div>
-      </div>
-      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 13.5, color: isIn ? COLORS.in : COLORS.out, whiteSpace: "nowrap" }}>
-        {isIn ? "+" : "-"}{fmtMoney(tx.paid, lang)}
-      </div>
-      {onEdit && (
-        <button onClick={() => onEdit(tx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.muted }}>
-          <Pencil size={15} />
-        </button>
-      )}
-      {onDelete && (
-        <button onClick={() => onDelete(tx.id)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.muted }}>
-          <Trash2 size={15} />
-        </button>
-      )}
-    </div>
-  );
-}
-
-function TxList({ t, lang, kind, transactions, parties, onAdd, onDelete, onEdit, search, setSearch }) {
-  const filtered = transactions.filter((x) => {
-    const p = parties.find((pp) => pp.id === x.partyId);
-    const hay = `${p ? p.name : ""} ${x.description}`.toLowerCase();
-    return hay.includes(search.toLowerCase());
-  });
-  const label = kind === "purchase" ? t.purchases : t.sales;
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{label}</h2>
-        <Btn variant="accent" onClick={onAdd}><Plus size={16} /> {kind === "purchase" ? t.addPurchase : t.addSale}</Btn>
-      </div>
-      <div style={{ position: "relative", marginBottom: 14, maxWidth: 320 }}>
-        <Search size={15} style={{ position: "absolute", top: 11, insetInlineStart: 10, color: COLORS.muted }} />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t.search}
-          style={{ width: "100%", padding: "9px 12px 9px 34px", borderRadius: 8, border: `1px solid ${COLORS.border}`, fontSize: 14, boxSizing: "border-box", fontFamily: "inherit" }} />
-      </div>
-      {filtered.length === 0 ? <Empty t={t} /> : (
-        <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, overflow: "hidden" }}>
-          {filtered.map((x, i) => {
-            const p = parties.find((pp) => pp.id === x.partyId);
-            return <TxRow key={x.id} tx={x} lang={lang} t={t} last={i === filtered.length - 1} partyName={p ? p.name : ""} onDelete={onDelete} onEdit={onEdit} />;
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PartiesView({ t, lang, parties, onAdd, onOpen, search, setSearch }) {
-  const filtered = parties.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{t.parties}</h2>
-        <Btn variant="accent" onClick={onAdd}><Plus size={16} /> {t.addParty}</Btn>
-      </div>
-      <div style={{ position: "relative", marginBottom: 14, maxWidth: 320 }}>
-        <Search size={15} style={{ position: "absolute", top: 11, insetInlineStart: 10, color: COLORS.muted }} />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t.search}
-          style={{ width: "100%", padding: "9px 12px 9px 34px", borderRadius: 8, border: `1px solid ${COLORS.border}`, fontSize: 14, boxSizing: "border-box", fontFamily: "inherit" }} />
-      </div>
-      {filtered.length === 0 ? <Empty t={t} /> : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 12 }}>
-          {filtered.map((p) => {
-            const typeLabel = p.type === "client" ? t.clientType : p.type === "supplier" ? t.supplierType : t.bothType;
-            const bal = p.balance;
-            return (
-              <div key={p.id} onClick={() => onOpen(p)} style={{
-                background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12,
-                padding: 16, cursor: "pointer",
-              }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>{p.name}</div>
-                  <Badge color={COLORS.inkSoft} bg={COLORS.accentSoft}>{typeLabel}</Badge>
-                </div>
-                <div style={{ fontSize: 12, color: COLORS.muted, marginBottom: 8 }}>
-                  {bal > 0 ? t.theyOweYou : bal < 0 ? t.youOweThem : t.settled}
-                </div>
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 800, fontSize: 16, color: bal > 0 ? COLORS.in : bal < 0 ? COLORS.out : COLORS.muted }}>
-                  {fmtMoney(Math.abs(bal), lang)}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ReportsView({ t, lang, reportMonth, setReportMonth, transactions, parties, totalReceivable, totalPayable,
-  onExportSummary, onExportSales, onExportPurchases, onExportBalances }) {
-  const sales = transactions.filter((x) => x.kind === "sale");
-  const purchases = transactions.filter((x) => x.kind === "purchase");
-  const totalSalesInvoiced = sales.reduce((s, x) => s + x.total, 0);
-  const totalPurchasesInvoiced = purchases.reduce((s, x) => s + x.total, 0);
-  const moneyIn = transactions.filter((x) => x.kind === "sale" || x.kind === "payment_in").reduce((s, x) => s + x.paid, 0);
-  const moneyOut = transactions.filter((x) => x.kind === "purchase" || x.kind === "payment_out").reduce((s, x) => s + x.paid, 0);
-  const net = moneyIn - moneyOut;
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{t.reports}</h2>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <input type="month" value={reportMonth} onChange={(e) => setReportMonth(e.target.value)}
-            style={{ padding: "8px 12px", borderRadius: 8, border: `1px solid ${COLORS.border}`, fontSize: 14, fontFamily: "inherit" }} />
-        </div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12, marginBottom: 22 }}>
-        <ReportCard title={t.summaryReport} desc={t.transactionsThisMonth} label={t.downloadExcel} onClick={onExportSummary} />
-        <ReportCard title={t.salesReportTitle} desc={t.sales} label={t.downloadExcel} onClick={onExportSales} />
-        <ReportCard title={t.purchasesReportTitle} desc={t.purchases} label={t.downloadExcel} onClick={onExportPurchases} />
-        <ReportCard title={t.balancesReport} desc={t.snapshot} label={t.downloadExcel} onClick={onExportBalances} />
-      </div>
-      <StitchDivider />
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", margin: "18px 0" }}>
-        <MetricCard label={t.moneyIn} value={fmtMoney(moneyIn, lang)} tone="in" />
-        <MetricCard label={t.moneyOut} value={fmtMoney(moneyOut, lang)} tone="out" />
-        <MetricCard label={t.netCashFlow} value={fmtMoney(net, lang)} tone={net >= 0 ? "in" : "out"} />
-      </div>
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
-        <MetricCard label={`${t.totalSales} (${t.invoiced})`} value={fmtMoney(totalSalesInvoiced, lang)} />
-        <MetricCard label={`${t.totalPurchases} (${t.invoiced})`} value={fmtMoney(totalPurchasesInvoiced, lang)} />
-      </div>
-      <StitchDivider />
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", margin: "18px 0" }}>
-        <MetricCard label={`${t.outstandingReceivables} (${t.snapshot})`} value={fmtMoney(totalReceivable, lang)} tone="in" />
-        <MetricCard label={`${t.outstandingPayables} (${t.snapshot})`} value={fmtMoney(totalPayable, lang)} tone="out" />
-      </div>
-      <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>{t.transactionsThisMonth}</h3>
-      {transactions.length === 0 ? <Empty t={t} /> : (
-        <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, overflow: "hidden" }}>
-          {transactions.map((x, i) => {
-            const p = parties.find((pp) => pp.id === x.partyId);
-            return <TxRow key={x.id} tx={x} lang={lang} t={t} last={i === transactions.length - 1} partyName={p ? p.name : ""} />;
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function InvoicesView({ t, lang, parties, transactions, partyId, setPartyId, dateFrom, setDateFrom, dateTo, setDateTo, mode, setMode }) {
-  const isRTL = lang === "ar";
-  const party = parties.find((p) => p.id === partyId) || null;
-  const partyTx = party ? transactions.filter((x) => x.partyId === party.id) : [];
-
-  const before = partyTx.filter((x) => x.date < dateFrom);
-  const openingBalance = before.reduce((s, x) => s + balanceImpact(x), 0);
-
-  const inPeriod = partyTx
-    .filter((x) => x.date >= dateFrom && x.date <= dateTo)
-    .sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
-
-  let running = openingBalance;
-  const ledgerRows = inPeriod.map((x) => {
-    const impact = balanceImpact(x);
-    running += impact;
-    const label = { purchase: t.purchases, sale: t.sales, payment_in: t.paymentIn, payment_out: t.paymentOut }[x.kind];
-    const desc = x.kind === "purchase" || x.kind === "sale"
-      ? `${x.description || label}${x.quantity ? ` (${x.quantity} × ${fmtMoney(x.unitPrice, lang)})` : ""}`
-      : (x.notes || label);
-    return {
-      date: x.date, label, desc,
-      debit: impact > 0 ? impact : 0,
-      credit: impact < 0 ? -impact : 0,
-      balanceAfter: running,
-    };
-  });
-
-  const totalDebit = ledgerRows.reduce((s, r) => s + r.debit, 0);
-  const totalCredit = ledgerRows.reduce((s, r) => s + r.credit, 0);
-  const closingBalance = openingBalance + (totalDebit - totalCredit);
-
-  function handlePrint() {
-    window.print();
-  }
-
-  const invoiceNo = party
-    ? `STMT-${dateFrom.replace(/-/g, "")}-${dateTo.replace(/-/g, "")}-${party.id.slice(0, 6).toUpperCase()}`
-    : "";
-  const paperInk = "#1A1A1A";
-  const paperMuted = "#666666";
-  const paperLine = "#222222";
-
-  return (
-    <div>
-      <div className="no-print">
-        <h2 style={{ margin: "0 0 16px", fontSize: 20, fontWeight: 800 }}>{t.invoicesTab}</h2>
-        <div style={{
-          background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12,
-          padding: 16, marginBottom: 20, display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end",
-        }}>
-          <div style={{ minWidth: 220 }}>
-            <Select label={t.chooseParty} value={partyId} onChange={(e) => setPartyId(e.target.value)}>
-              <option value="">—</option>
-              {parties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </Select>
-          </div>
-          <Input label={t.dateFrom} type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          <Input label={t.dateTo} type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <Btn variant={mode === "detailed" ? "accent" : "ghost"} onClick={() => setMode("detailed")}>{t.invoiceDetailed}</Btn>
-            <Btn variant={mode === "summary" ? "accent" : "ghost"} onClick={() => setMode("summary")}>{t.invoiceSummary}</Btn>
-          </div>
-          {party && (
-            <Btn variant="primary" onClick={handlePrint} style={{ marginBottom: 12 }}>
-              <Printer size={15} /> {t.printInvoice}
-            </Btn>
-          )}
-        </div>
-        {!party && <Empty t={{ noData: t.pickPartyFirst }} />}
-      </div>
-
-      {party && (
-        <div id="invoice-print-area" style={{
-          background: "#ffffff", border: `1px solid ${COLORS.border}`, borderRadius: 4,
-          padding: "40px 44px", maxWidth: 780, margin: "0 auto", color: paperInk,
-          fontFamily: "'Cairo', sans-serif",
-        }} dir={isRTL ? "rtl" : "ltr"}>
-
-          {/* Letterhead */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Scissors size={22} color={paperInk} />
-              <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: 0.3 }}>{t.appName}</div>
-            </div>
-            <div style={{ textAlign: isRTL ? "left" : "right" }}>
-              <div style={{ fontWeight: 800, fontSize: 22, textTransform: "uppercase", letterSpacing: 1 }}>{t.statementOfAccount}</div>
-              <div style={{ fontSize: 12.5, color: paperMuted, marginTop: 2 }}>{invoiceNo}</div>
-            </div>
-          </div>
-          <div style={{ height: 3, background: paperLine, margin: "14px 0 20px" }} />
-
-          {/* Bill-to / details block */}
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 20, flexWrap: "wrap", marginBottom: 24 }}>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: paperMuted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
-                {party.type === "supplier" ? t.supplier : t.client}
-              </div>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>{party.name}</div>
-              <div style={{ fontSize: 12.5, color: paperMuted, marginTop: 2 }}>
-                {party.type === "client" ? t.clientType : party.type === "supplier" ? t.supplierType : t.bothType}
-                {party.phone ? ` · ${party.phone}` : ""}
-              </div>
-            </div>
-            <div style={{ textAlign: isRTL ? "left" : "right", fontSize: 12.5 }}>
-              <div style={{ marginBottom: 4 }}><span style={{ color: paperMuted }}>{t.period}: </span><b>{dateFrom} → {dateTo}</b></div>
-              <div><span style={{ color: paperMuted }}>{t.generatedOn}: </span><b>{todayISO()}</b></div>
-            </div>
-          </div>
-
-          {mode === "detailed" && (
-            ledgerRows.length === 0 ? (
-              <div style={{ padding: 20, textAlign: "center", color: paperMuted, border: `1px solid ${COLORS.border}` }}>{t.noTxInPeriod}</div>
-            ) : (
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, marginBottom: 20 }}>
-                <thead>
-                  <tr style={{ borderBottom: `2px solid ${paperLine}` }}>
-                    <th style={{ padding: "6px 8px", textAlign: isRTL ? "right" : "left", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 }}>{t.date}</th>
-                    <th style={{ padding: "6px 8px", textAlign: isRTL ? "right" : "left", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 }}>{t.description}</th>
-                    <th style={{ padding: "6px 8px", textAlign: isRTL ? "right" : "left", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 }}>{t.debit}</th>
-                    <th style={{ padding: "6px 8px", textAlign: isRTL ? "right" : "left", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 }}>{t.credit}</th>
-                    <th style={{ padding: "6px 8px", textAlign: isRTL ? "right" : "left", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 }}>{t.runningBalance}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-                    <td colSpan={4} style={{ padding: "6px 8px", fontStyle: "italic", color: paperMuted }}>{t.openingBalance}</td>
-                    <td style={{ padding: "6px 8px", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>{fmtMoney(Math.abs(openingBalance), lang)}</td>
-                  </tr>
-                  {ledgerRows.map((r, i) => (
-                    <tr key={i} style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-                      <td style={{ padding: "7px 8px" }}>{r.date}</td>
-                      <td style={{ padding: "7px 8px" }}>{r.desc}</td>
-                      <td style={{ padding: "7px 8px", fontFamily: "'JetBrains Mono', monospace" }}>{r.debit ? fmtMoney(r.debit, lang) : "—"}</td>
-                      <td style={{ padding: "7px 8px", fontFamily: "'JetBrains Mono', monospace" }}>{r.credit ? fmtMoney(r.credit, lang) : "—"}</td>
-                      <td style={{ padding: "7px 8px", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>{fmtMoney(Math.abs(r.balanceAfter), lang)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )
-          )}
-
-          {/* Totals box */}
-          <div style={{ display: "flex", justifyContent: isRTL ? "flex-start" : "flex-end", marginBottom: 36 }}>
-            <table style={{ borderCollapse: "collapse", fontSize: 13, minWidth: 260 }}>
-              <tbody>
-                <tr>
-                  <td style={{ padding: "5px 14px 5px 0", color: paperMuted }}>{t.openingBalance}</td>
-                  <td style={{ padding: "5px 0", textAlign: isRTL ? "left" : "right", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMoney(Math.abs(openingBalance), lang)}</td>
-                </tr>
-                <tr>
-                  <td style={{ padding: "5px 14px 5px 0", color: paperMuted }}>{t.totalDebit}</td>
-                  <td style={{ padding: "5px 0", textAlign: isRTL ? "left" : "right", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMoney(totalDebit, lang)}</td>
-                </tr>
-                <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-                  <td style={{ padding: "5px 14px 5px 0", color: paperMuted }}>{t.totalCredit}</td>
-                  <td style={{ padding: "5px 0", textAlign: isRTL ? "left" : "right", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMoney(totalCredit, lang)}</td>
-                </tr>
-                <tr style={{ borderTop: `2px solid ${paperLine}` }}>
-                  <td style={{ padding: "8px 14px 0 0", fontWeight: 800, fontSize: 14 }}>{t.closingBalance}</td>
-                  <td style={{ padding: "8px 0 0", textAlign: isRTL ? "left" : "right", fontWeight: 800, fontSize: 16, fontFamily: "'JetBrains Mono', monospace" }}>
-                    {fmtMoney(Math.abs(closingBalance), lang)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          {/* Signatures */}
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 40, marginTop: 50 }}>
-            <div style={{ flex: 1, textAlign: "center" }}>
-              <div style={{ borderTop: `1px solid ${paperInk}`, paddingTop: 6, fontSize: 12, color: paperMuted }}>
-                {t.appName}
-              </div>
-            </div>
-            <div style={{ flex: 1, textAlign: "center" }}>
-              <div style={{ borderTop: `1px solid ${paperInk}`, paddingTop: 6, fontSize: 12, color: paperMuted }}>
-                {party.name}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TxModal({ t, lang, kind, parties, editTx, onClose, onSave }) {
-  const relevantParties = parties.filter((p) => kind === "purchase" ? p.type !== "client" : p.type !== "supplier");
-  const [form, setForm] = useState({
-    date: editTx ? editTx.date : todayISO(),
-    partyId: editTx ? editTx.partyId : (relevantParties[0]?.id || "__new__"),
-    newPartyName: "",
-    description: editTx ? editTx.description : "",
-    quantity: editTx ? editTx.quantity : 1,
-    unitPrice: editTx ? editTx.unitPrice : "",
-    paid: editTx ? editTx.paid : "",
-    notes: editTx ? editTx.notes : "",
-  });
-  const total = (Number(form.quantity) || 0) * (Number(form.unitPrice) || 0);
-  const canSave = (form.partyId !== "__new__" || form.newPartyName.trim()) && Number(form.unitPrice) > 0;
-
-  return (
-    <Modal title={(editTx ? `${t.edit} — ` : "") + (kind === "purchase" ? t.addPurchase : t.addSale)} onClose={onClose}>
-      <Input label={t.date} type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-      <Select label={kind === "purchase" ? t.supplier : t.client} value={form.partyId}
-        onChange={(e) => setForm({ ...form, partyId: e.target.value })}>
-        {relevantParties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        <option value="__new__">{t.newParty}</option>
-      </Select>
-      {form.partyId === "__new__" && (
-        <Input label={t.name} value={form.newPartyName} onChange={(e) => setForm({ ...form, newPartyName: e.target.value })} />
-      )}
-      <Input label={t.description} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ flex: 1 }}>
-          <Input label={t.quantity} type="number" min="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <Input label={t.unitPrice} type="number" min="0" value={form.unitPrice} onChange={(e) => setForm({ ...form, unitPrice: e.target.value })} />
-        </div>
-      </div>
-      <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 12 }}>
-        {t.total}: <b style={{ fontFamily: "'JetBrains Mono', monospace" }}>{fmtMoney(total, lang)}</b>
-      </div>
-      <Input label={t.paid} type="number" min="0" max={total} value={form.paid} onChange={(e) => setForm({ ...form, paid: e.target.value })} />
-      <Input label={t.notes} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
-        <Btn variant="ghost" onClick={onClose}>{t.cancel}</Btn>
-        <Btn variant="accent" disabled={!canSave} onClick={() => onSave(form)}>{t.save}</Btn>
-      </div>
-    </Modal>
-  );
-}
-
-function PaymentModal({ t, lang, party, editPay, onClose, onSave }) {
-  const [amount, setAmount] = useState(editPay ? editPay.paid : "");
-  const [date, setDate] = useState(editPay ? editPay.date : todayISO());
-  const [notes, setNotes] = useState(editPay ? editPay.notes : "");
-  const isIn = party.type !== "supplier";
-  return (
-    <Modal title={(editPay ? `${t.edit} — ` : "") + `${t.recordPayment} — ${party.name}`} onClose={onClose}>
-      <Input label={t.date} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      <Input label={t.paymentAmount} type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
-      <Input label={t.notes} value={notes} onChange={(e) => setNotes(e.target.value)} />
-      <div style={{ fontSize: 12.5, color: COLORS.muted, marginBottom: 12 }}>
-        {isIn ? t.paymentIn : t.paymentOut}
-      </div>
-      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-        <Btn variant="ghost" onClick={onClose}>{t.cancel}</Btn>
-        <Btn variant="accent" disabled={!(Number(amount) > 0)} onClick={() => onSave({ date, amount, notes })}>{t.save}</Btn>
-      </div>
-    </Modal>
-  );
-}
-
-function PartyModal({ t, lang, editParty, onClose, onSave }) {
-  const [name, setName] = useState(editParty ? editParty.name : "");
-  const [type, setType] = useState(editParty ? editParty.type : "client");
-  const [phone, setPhone] = useState(editParty ? (editParty.phone || "") : "");
-  return (
-    <Modal title={editParty ? `${t.edit} — ${t.addParty}` : t.addParty} onClose={onClose}>
-      <Input label={t.name} value={name} onChange={(e) => setName(e.target.value)} />
-      <Select label={t.type} value={type} onChange={(e) => setType(e.target.value)}>
-        <option value="client">{t.clientType}</option>
-        <option value="supplier">{t.supplierType}</option>
-        <option value="both">{t.bothType}</option>
-      </Select>
-      <Input label={t.phone} value={phone} onChange={(e) => setPhone(e.target.value)} />
-      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
-        <Btn variant="ghost" onClick={onClose}>{t.cancel}</Btn>
-        <Btn variant="accent" disabled={!name.trim()} onClick={() => onSave(name.trim(), type, phone)}>{t.save}</Btn>
-      </div>
-    </Modal>
-  );
-}
-
-function PartyDetailModal({ t, lang, party, transactions, onClose, onPay, onDeleteTx, onEditTx, onEditParty, onDeleteParty }) {
-  const bal = party.balance ?? 0;
-  const typeLabel = party.type === "client" ? t.clientType : party.type === "supplier" ? t.supplierType : t.bothType;
-  const sorted = [...transactions].sort((a, b) => (a.date < b.date ? 1 : -1));
-  return (
-    <Modal title={party.name} onClose={onClose} wide>
-      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-        <Badge color={COLORS.inkSoft} bg={COLORS.accentSoft}>{typeLabel}</Badge>
-        {party.phone && <Badge color={COLORS.inkSoft} bg={COLORS.bg}>{party.phone}</Badge>}
-      </div>
-      <div style={{
-        background: bal > 0 ? COLORS.inSoft : bal < 0 ? COLORS.outSoft : COLORS.bg,
-        borderRadius: 10, padding: 14, marginBottom: 16,
-      }}>
-        <div style={{ fontSize: 12.5, color: COLORS.muted, marginBottom: 4 }}>
-          {bal > 0 ? t.theyOweYou : bal < 0 ? t.youOweThem : t.settled}
-        </div>
-        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 800, fontSize: 20, color: bal > 0 ? COLORS.in : bal < 0 ? COLORS.out : COLORS.muted }}>
-          {fmtMoney(Math.abs(bal), lang)}
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
-        <Btn variant="accent" onClick={onPay}><Wallet size={15} /> {t.recordPayment}</Btn>
-        <Btn variant="ghost" onClick={onEditParty}><Pencil size={15} /> {t.edit}</Btn>
-        <Btn variant="danger" onClick={onDeleteParty}><Trash2 size={15} /> {t.delete}</Btn>
-      </div>
-      <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>{t.history}</h4>
-      {sorted.length === 0 ? <Empty t={t} /> : (
-        <div style={{ border: `1px solid ${COLORS.border}`, borderRadius: 10, overflow: "hidden" }}>
-          {sorted.map((x, i) => <TxRow key={x.id} tx={x} lang={lang} t={t} last={i === sorted.length - 1} onDelete={onDeleteTx} onEdit={onEditTx} />)}
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-function AuthScreen({ hasAdmin, lang, t, onCreated, onLoggedIn }) {
-  const isRTL = lang === "ar";
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function submit() {
-    setError("");
-    if (!username.trim() || !password) { setError(t.fillAllFields); return; }
-    setBusy(true);
-    try {
-      if (!hasAdmin) {
-        if (password !== confirm) { setError(t.passwordsMustMatch); setBusy(false); return; }
-        if (password.length < 4) { setError(t.passwordTooShort); setBusy(false); return; }
-        const res = await window.auth.createAdmin(username.trim(), password);
-        if (res && res.ok) onCreated(); else setError(t.invalidCredentials);
-      } else {
-        const res = await window.auth.login(username.trim(), password);
-        if (res && res.ok) onLoggedIn(); else setError(t.invalidCredentials);
-      }
-    } catch (e) {
-      setError(t.invalidCredentials);
-    }
-    setBusy(false);
-  }
-
-  return (
-    <div dir={isRTL ? "rtl" : "ltr"} style={{
-      minHeight: 600, display: "flex", alignItems: "center", justifyContent: "center",
-      background: COLORS.bg, fontFamily: "'Cairo', sans-serif", borderRadius: 16,
-      border: `1px solid ${COLORS.border}`,
-    }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');`}</style>
-      <div style={{
-        width: 340, background: COLORS.surface, borderRadius: 14, padding: 28,
-        border: `1px solid ${COLORS.border}`, boxShadow: "0 12px 30px rgba(35,40,64,0.12)",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <Scissors size={20} color={COLORS.accent} />
-          <div style={{ fontWeight: 800, fontSize: 17 }}>{t.appName}</div>
-        </div>
-        <div style={{ fontSize: 13, color: COLORS.muted, marginBottom: 18 }}>
-          {hasAdmin ? t.welcomeBack : t.setupAdminDesc}
-        </div>
-        <Input label={t.username} value={username} onChange={(e) => setUsername(e.target.value)} />
-        <Input label={t.password} type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && hasAdmin) submit(); }} />
-        {!hasAdmin && (
-          <Input label={t.confirmPassword} type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
-        )}
-        {error && <div style={{ color: COLORS.out, fontSize: 13, marginBottom: 10 }}>{error}</div>}
-        <Btn variant="accent" disabled={busy} style={{ width: "100%", justifyContent: "center", marginTop: 6 }} onClick={submit}>
-          {hasAdmin ? t.loginButton : t.createAdminAccount}
-        </Btn>
-      </div>
+      {shortcutsOpen && <ShortcutsModal t={t} onClose={() => setShortcutsOpen(false)} />}
+      <ToastHost toasts={toasts} onDismiss={dismissToast} t={t} />
     </div>
   );
 }
